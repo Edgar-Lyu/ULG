@@ -1,2 +1,2 @@
 # ULG
-The code of ULG model
+The code of ULG model, programmed with NetLogo
