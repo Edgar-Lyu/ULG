@@ -1,0 +1,3326 @@
+breed [ highways highway ]   ;; RoadGrade = 1
+breed [ arterials arterial ]   ;; RoadGrade = 2
+breed [ distributors distributor ]   ;; RoadGrade = 3
+breed [ locals local ]  ;; RoadGrade = 4
+breed [ roadnodes roadnode ]
+breed [ stations station ]
+breed [ districts district]
+breed [ neighbourhoods neighbourhood]
+breed [ travellers traveller ]
+breed [ traveller2s traveller2]
+breed [ landfiles landfile] ;; to read land use file and check the number of line of a specific piece of land
+
+undirected-link-breed [ highwaylinks highwaylink ]   ;; RoadGrade = 1
+undirected-link-breed [ arteriallinks arteriallink ]   ;; RoadGrade = 2
+undirected-link-breed [ distributorlinks distributorlink ]   ;; RoadGrade = 3
+undirected-link-breed [ locallinks locallink ]  ;; RoadGrad = 4
+undirected-link-breed [ templinks templink ]
+directed-link-breed [cartrips cartrip]
+directed-link-breed [biketrips biketrip]
+directed-link-breed [pttrips pttrip]
+
+
+globals [ CityRadiusReal CityRadius AreaPatch GoOn Radius DistanceHighways DistanceArterials DistanceDistributors DistanceLocals EmptyLand UrbanLand Dhigh Dlow]
+patches-own [ urban pop lu road N-district N-neighbourhood Rdns] ;;pop is population density, lu is land use(1 residence; 2 industry; 3 commerce; 4 office; 5 green & open), road (0 no; 1 highway; 2 arterial; 3 distributor; 4 local)
+turtles-own [ RoadGrade Node temporary ]
+stations-own [ ptID terminal ]
+links-own [ RoadLength ]
+;; D-pop is density of population (people in every km2), D-popr is a temporary variable in residential allocation.
+districts-own [ D-No D-node D-area D-pop D-residentials p-wait D-suitability D-empty landuses Dr Dr-area Drh Drh-area Drl Drl-area Di Di-area Dc Dc-area Do Do-area Dg Dg-area allocated? Entropy D-Type] ;; D-pop is density, D-residentials is population D-popr is residential density
+neighbourhoods-own [ N-No D-No N-node N-area D-pop N-residentials p-wait N-suitability N-empty landuses Nr Nrh Nrl Ni Nc No Ng Entropy]
+travellers-own [ PersID FactorP HomePC4 HomePC6 HomeNode DeparTime Motive Duration Verplnr VertPC AankPC WorkPC4 WorkPC6 WorkNode HouseID gender age income education physical FullWork WorkType car bike PT TransMode
+  license civilian year act-num after before fix]
+cartrips-own [ number ]
+biketrips-own [ number ]
+pttrips-own [ number ]
+landfiles-own [Num-line Land-node Land-type D-No N-No]
+
+
+to setup
+  clear-all
+  file-close-all
+  set-default-shape turtles "circle"
+  build-urban
+  show-urban
+end
+
+
+to build-urban
+  set CityRadiusReal (Area / pi) ^ 0.5
+  set CityRadius CityRadiusReal * 1000 / Resolution
+  set Radius 0
+  set DistanceArterials precision (Distance_Arterials * 1000 / Resolution) 1
+  set DistanceHighways DistanceArterials * 2
+  set DistanceDistributors DistanceArterials / Num-D
+
+  ask patches [
+    if (distancexy 0 0) <= CityRadius [ set urban true ]
+  ]
+  set AreaPatch count patches with [urban = true]
+end
+
+
+to show-urban
+  ask turtles [hide-turtle]
+  ask links [hide-link]
+
+  ask patches [
+    ifelse urban = true [
+      set pcolor 6 ]
+    [
+      set pcolor white ]
+  ]
+end
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;
+;;  Population Part  ;;
+;;;;;;;;;;;;;;;;;;;;;;;
+
+
+
+
+to generate-population ;;unit is   per km2
+  if PopulationModel = "Clark" [ P-Clark ]
+  if PopulationModel = "Newling" [ P-Newling ]
+  if PopulationModel = "Quadratic" [ P-Quadratic ]
+end
+
+to P-Clark  ;; Dx = D0 * e ^ (b1 * x) ;(b1 < 0)
+  ask patches [ set pop D0 * e ^ (b1 * (distancexy 0 0) * Resolution / 1000)]  ;;pop now is relative weight relating to patch 0 0
+  let D (Population * 1000000 / Resolution ^ 2 - sum [pop] of patches with [urban = true]) / AreaPatch
+  ;;show (sum [pop] of patches with [urban = true]) * Resolution ^ 2 / 1000000
+  ;;show D
+  ask patches [ ifelse urban = true
+    [set pop pop + D]
+    [set pop 0] ]
+end
+
+to P-Newling  ;; Dx = D0 * e ^ (b1 * x + b2 * x ^ 2) ;;(b2 < 0)
+  ask patches [ set pop D0 * e ^ (b1 * (distancexy 0 0) * Resolution / 1000 - b2 * ((distancexy 0 0) * Resolution / 1000) ^ 2)]
+  let D (Population * 1000000 / Resolution ^ 2 - sum [pop] of patches with [urban = true]) / AreaPatch
+  ;;show (sum [pop] of patches with [urban = true]) * Resolution ^ 2 / 1000000
+  ;;show D
+  ask patches [ ifelse urban = true
+    [set pop pop + D]
+    [set pop 0] ]
+end
+
+to P-Quadratic  ;; Dx = D0 + b1 * x + b2 * x ^ 2
+  ask patches with [urban = true] [ set pop D0 + b1 * (distancexy 0 0) * Resolution / 1000 + b2 * ((distancexy 0 0) * Resolution / 1000) ^ 2]
+  let D (Population * 1000000 / Resolution ^ 2 - sum [pop] of patches with [urban = true]) / AreaPatch
+  ;;show (sum [pop] of patches with [urban = true]) * Resolution ^ 2 / 1000000
+  ;;show D
+  ask patches [ ifelse urban = true
+    [set pop pop + D]
+    [set pop 0] ]
+end
+
+to show-population
+  ask patches [
+    if pop < 0 [set pcolor red]
+   if 0 = pop [ set pcolor white ]
+   if 0 < pop and pop < 200 [ set pcolor 9 ]
+   if 200 <= pop and pop < 500 [ set pcolor 8 ]
+   if 500 <= pop and pop < 1000 [ set pcolor 7 ]
+   if 1000 <= pop and pop < 1500 [ set pcolor 6 ]
+   if 1500 <= pop and pop < 2000 [ set pcolor 5 ]
+   if 2000 <= pop and pop < 3500 [ set pcolor 4 ]
+   if 3500 <= pop and pop < 5000 [ set pcolor 3 ]
+   if 5000 <= pop and pop < 7000 [ set pcolor 2 ]
+   if 7000 <= pop and pop < 10000 [ set pcolor 1 ]
+   if 10000 <= pop [ set pcolor 0 ]]
+end
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;  Highway & Arterial  ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+to Build-Roadnetwork
+  if Highway? = true [ build-highway ]
+  build-arterial
+end
+
+
+
+to Build-Highway
+  if RoadPattern = "Radial" [
+    create-highways 1 [
+      set RoadGrade 1
+      let rRing DistanceHighways
+      Build_Radial rRing DistanceHighways RadialBranch]
+    create-ordered-highways RadialBranch [
+      set RoadGrade 1
+      fd DistanceHighways
+      Build_Straight DistanceHighways
+      die ]  ]
+
+  if RoadPattern = "Checker" [
+    create-highways 1 [
+      set RoadGrade 1
+      set heading 0
+      let HalfLength 0.5 * DistanceHighways
+      fd HalfLength
+      while [ urban = true ] [
+        set heading 90
+        fd HalfLength
+        rt 90 Build_Segment 2 * HalfLength
+        rt 90 Build_Segment 2 * HalfLength
+        rt 90 Build_Segment 2 * HalfLength
+        rt 90 Build_Segment 2 * HalfLength
+        set HalfLength HalfLength + DistanceHighways
+        setxy 0 0
+        set heading 0
+        fd HalfLength
+      ]
+      die
+    ]
+    create-ordered-highways 4 [
+      set RoadGrade 1
+      set temporary 1
+      let HalfLength 0.5 * DistanceHighways
+      fd HalfLength
+      hatch 1 [
+        rt 90
+        fd HalfLength
+        let a random 3
+        if a = 1 [ lt 45 ]
+        if a = 2 [ lt 90 ] ] ]
+    ask n-of RadialBranch highways with [temporary = 1] [
+      Build_Straight DistanceHighways ]
+    ask highways with [count link-neighbors = 0] [ die ]
+  ]
+
+  ask patches with [count highways-here > 1] [
+    let a 0
+    ask one-of highways-here [set a who]
+    ask highways-here with [who != a] [
+      ask link-neighbors [ create-templink-with turtle a ]
+      die ]
+  ]
+
+  ask highways [ set color blue ]
+  ask templinks [
+    set breed highwaylinks
+    set color blue ]
+end
+
+
+to Build-Arterial
+  if RoadPattern = "Radial" [
+    create-ordered-arterials RadialBranch [   ;; to build branches
+      set RoadGrade 2
+      Build_Straight DistanceArterials
+      die ]
+    create-arterials 1 [                      ;; to build rings
+      set RoadGrade 2
+      let rRing DistanceArterials
+      Build_Radial rRing DistanceArterials RadialBranch ]
+  ]
+
+  if RoadPattern = "Checker" [
+    create-ordered-arterials 4 [
+      set RoadGrade 2
+      Build_Checker DistanceArterials ]
+  ]
+
+  ask patches with [count arterials-here > 1] [
+    let a 0
+    ask one-of arterials-here [set a who]
+    ask arterials-here with [who != a] [
+      ask link-neighbors [ create-templink-with turtle a ]
+      die ]
+  ]
+
+  ask arterials [ set color red ]
+  ask templinks [
+    set breed arteriallinks
+    set color red ]
+end
+
+
+
+to Build_Radial [ rRing DistanceRoad Branches]       ;; Branches is the number of branch roads
+  setxy 0 0 set heading 0
+  fd rRing
+  rt 90
+
+  ifelse urban = true [
+    Build_Ring rRing                                      ;; "urban = true" means need to build new ring & branches
+    let theta (2 * pi / Branches)
+    if (rRing * theta) > (DistanceRoad * 1.5) [        ;; means need to build new branches
+       setxy 0 0 set heading 0
+       rt 180 / Branches
+       let AddedBranches 0
+       while [ AddedBranches < Branches ] [
+         hatch 1 [
+           rt AddedBranches * 360 / Branches
+           fd rRing
+           Build_Straight DistanceRoad
+           set AddedBranches AddedBranches + 1
+           die ]
+       ]
+       set Branches Branches * 2 ]
+    set rRing rRing + DistanceRoad
+    Build_Radial rRing DistanceRoad Branches ]
+  [ die ]
+end
+
+to Build_Ring [ rRing ] ;; see the model of "circular path example"
+  let px0 [pxcor] of patch-here  ;; px0 py0 is patch of last step, px py is patch of this step
+  let py0 [pycor] of patch-here
+  let px [pxcor] of patch-here
+  let py [pycor] of patch-here
+  let a 0
+  set road RoadGrade
+  hatch 1 [
+    move-to patch-here
+    set a who ]
+
+  let step 0.2
+  let theta step * 180 / (pi * rRing)
+  let angle 0
+  while [angle < 360] [
+    rt theta / 2
+    fd step
+    rt theta / 2
+    set angle angle + theta
+
+    set px [pxcor] of patch-here
+    set py [pycor] of patch-here
+    if px != px0 or py != py0 [
+      set road RoadGrade
+      hatch 1 [
+        move-to patch-here
+        create-templink-with turtle a
+        set a who
+      ]
+      set px0 px
+      set py0 py
+    ]
+  ]
+end
+
+to Build_Segment [ segment ]
+  let px0 [pxcor] of patch-here
+  let py0 [pycor] of patch-here
+  let px [pxcor] of patch-here
+  let py [pycor] of patch-here
+  set road RoadGrade
+  let a 0
+  hatch 1 [
+    move-to patch-here
+    set a who ]
+  let BuiltLength 0
+  while [ BuiltLength < segment and urban = true] [
+    let step 0.2
+    fd step
+    set BuiltLength BuiltLength + step
+    set px [pxcor] of patch-here
+    set py [pycor] of patch-here
+    if px != px0 or py != py0 [
+      set road RoadGrade
+      hatch 1 [
+        move-to patch-here
+        create-templink-with turtle a
+        set a who ]
+      set px0 px
+      set py0 py
+    ]
+  ]
+end
+
+
+to Build_Checker [ DistanceRoad ]
+  fd DistanceRoad * 0.5
+  while [urban = true] [
+    ;;Build_Segment DistanceRoad
+    hatch 1 [
+      rt 90
+      while [urban = true] [Build_Segment DistanceRoad]
+      die ]
+    hatch 1 [
+      lt 90
+      while [urban = true] [Build_Segment DistanceRoad]
+      die ]
+    fd DistanceRoad
+  ]
+  die
+end
+
+
+to Build_Straight [ DistanceRoad ]
+  let px0 [pxcor] of patch-here
+  let py0 [pycor] of patch-here
+  let px [pxcor] of patch-here
+  let py [pycor] of patch-here
+  set road RoadGrade
+  let a 0
+  hatch 1 [
+    move-to patch-here
+    set a who ]
+
+  while [ urban = true ] [
+    let BuiltLength 0
+    while [ BuiltLength < DistanceRoad ] [
+      let step 0.2
+      fd step
+      set BuiltLength BuiltLength + step
+      set px [pxcor] of patch-here
+      set py [pycor] of patch-here
+      if px != px0 or py != py0 [
+        set road RoadGrade
+        hatch 1 [
+          move-to patch-here
+          create-templink-with turtle a
+          set a who
+        ]
+        set px0 px
+        set py0 py
+      ]
+    ]
+  ]
+end
+
+
+to CheckEndArterial
+  if urban = false [ die ]
+end
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; District Part ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+
+to build-districts
+  ;;no-display
+  ask patches with [urban = true and road = 0] [set pcolor cyan]
+  let pc4 1001
+  while [any? patches with [urban = true and road = 0 and N-district = 0]] [
+    add-a-district pc4
+    set pc4 pc4 + 1
+  ]
+  combine-districts
+  ;;display
+end
+
+
+to add-a-district [n]
+  ask one-of patches with [urban = true and road = 0 and N-district = 0] [
+    set N-district n
+    while [any? patches with [N-district = n and pcolor = cyan] ] [
+      ask patches with [N-district = n and pcolor = cyan] [
+        ask neighbors4 [
+          if urban = true and road = 0 and N-district = 0 [set N-district n]
+        ]
+        set pcolor black
+      ]
+    ]
+
+    sprout-districts 1 [
+      set size 2
+      set color blue
+      set D-No n
+      setxy (mean [pxcor] of patches with [N-district = n]) (mean [pycor] of patches with [N-district = n])
+      set D-area count patches with [N-district = n]
+      set D-pop mean [pop] of patches with [N-district = n]
+      set D-residentials round (D-pop * D-area * resolution ^ 2 / 1000000)
+    ]
+  ]
+end
+
+
+to combine-districts
+  if CentralD > 0 [
+    ask min-one-of districts [distancexy 0 0] [set D-type 1]  ; to imply it is central district.
+  ]
+  let max-district-size [D-area] of max-one-of districts with [D-type = 0] [D-area]
+  let min-district-size [D-area] of min-one-of districts with [D-type = 0] [D-area]
+  let temp [who] of min-one-of districts with [D-type = 0] [D-area]
+  while [min-district-size < Min-D * max-district-size] [
+    ask district temp [
+      let initialD D-No
+      let aimD -1
+      ask min-one-of other districts with [D-type = 0] [distance myself] [
+        set aimD D-No
+      ]
+      ask patches with [N-district = initialD] [
+        set N-district aimD
+      ]
+      ask one-of districts with [D-No = aimD] [
+        set D-area count patches with [N-district = aimD]
+        set D-pop mean [pop] of patches with [N-district = aimD]
+        set D-residentials round (D-pop * D-area * resolution ^ 2 / 1000000)
+        setxy (mean [pxcor] of patches with [N-district = aimD]) (mean [pycor] of patches with [N-district = aimD])
+      ]
+      die
+    ]
+    set min-district-size [D-area] of min-one-of districts with [D-type = 0] [D-area]
+    set temp [who] of min-one-of districts with [D-type = 0] [D-area]
+  ]
+  if CentralD = 1 [ask districts with [D-type = 1] [set D-type 0]]
+  if CentralD = 2 [ask districts with [D-type = 1] [set D-type 1]]
+  if CentralD = 3 [ask districts with [D-type = 1] [set D-type 2]]
+end
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Land use on Districts ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+
+to landuse-districts
+  if Residential + Industrial + Commercial + Office + Green&open + Others != 100 [
+    user-message "Error! Total land use percentage is not 100!"
+  ]
+  ask patches with [urban = true] [
+    ifelse road = 0
+    [ set lu 0]
+    [ set lu 6]
+  ]
+  set EmptyLand count patches with [urban = true and lu = 0]
+
+  ;;pre-allocation
+  let minI 0
+  let minC 0
+  let minO 0
+  let minG 0
+  if minI + minC + minO + minG > 0 [
+    ask districts [
+      set D-empty count patches with [N-district = [D-No] of myself and lu = 0]
+      let pre-commercial round (minC / 100 * D-empty)
+      ask n-of pre-commercial patches with [N-district = [D-No] of myself and lu = 0] [
+        set lu 3
+        set pcolor red    ]
+      let pre-green round (minG / 100 * D-empty)
+      ask n-of pre-green patches with [N-district = [D-No] of myself and lu = 0] [
+        set lu 5
+        set pcolor green]
+    ]
+  ]
+
+  ;; set aims of land uses
+  let AimI round (EmptyLand * (Industrial - minI) / 100)
+  let AimI-int int (AimI / Allocation-Rounds-D)
+  let AimI-mod (AimI mod Allocation-Rounds-D)
+  let AimC round (EmptyLand * (Commercial - minC) / 100)
+  let AimC-int int (AimC / Allocation-Rounds-D)
+  let AimC-mod (AimC mod Allocation-Rounds-D)
+  let AimO round (EmptyLand * (Office - minO) / 100)
+  let AimO-int int (AimO / Allocation-Rounds-D)
+  let AimO-mod (AimO mod Allocation-Rounds-D)
+  let AimG round (EmptyLand * (green&open - minG) / 100)
+  let AimG-int int (AimG / Allocation-Rounds-D)
+  let AimG-mod (AimG mod Allocation-Rounds-D)
+
+  ;; high density is 100000/km2(1000/hectare), low is 5000/km2 (200/hectare)?
+  let AimR round (EmptyLand * Residential / 100)
+  set Dhigh Dhigh-km * resolution ^ 2 / 1000000  ;;dhigh and dlow are density of patches
+  set Dlow Dlow-km * resolution ^ 2 / 1000000
+  if round (Dhigh * AimR) < population [
+    user-message "Error! Residential is not enough!"
+    stop
+  ]
+  if round (Dlow * AimR) > population[
+    user-message "Error! Residential is too much!"
+    stop
+  ]
+
+  ;;deal with the people 'live' at roads
+  ask patches with [lu = 6] [
+    let a pop
+    ask one-of neighbors with [urban = true and lu = 0] [
+      set pop pop + a
+    ]
+    set pop 0
+  ]
+  ask districts [
+    set D-pop mean [pop] of patches with [N-district = [D-No] of myself]
+    set D-residentials round (D-pop * D-area * resolution ^ 2 / 1000000)
+  ]
+  ;; adjust total population
+  let H-pop sum [D-residentials] of districts
+  if H-pop > population [
+    ask min-one-of districts [D-pop] [
+      set D-residentials D-residentials - (H-pop - population)
+    ]
+  ]
+  if H-pop < population [
+    ask max-one-of districts [D-pop] [
+      set D-residentials D-residentials + (population - H-pop)
+    ]
+  ]
+
+  let AimHigh round (Population - Dlow * AimR) / (Dhigh - Dlow)
+  let AimLow AimR - AimHigh
+
+  let Allocation-Rounds Allocation-Rounds-D
+  allocate-residential AimR AimHigh AimLow
+  while [Allocation-Rounds > 0] [
+    allocate-industrial (AimI-int + ifelse-value (AimI-mod > 0) [1] [0] )
+    allocate-commercial (AimC-int + ifelse-value (AimC-mod > 0) [1] [0] )
+
+    allocate-office (AimO-int + ifelse-value (AimO-mod > 0) [1] [0] )
+    allocate-green&open (AimG-int + ifelse-value (AimG-mod > 0) [1] [0] )
+
+
+    set Allocation-Rounds Allocation-Rounds - 1
+    set AimI-mod AimI-mod - 1
+    set AimC-mod AimC-mod - 1
+    set AimO-mod AimO-mod - 1
+    set AimG-mod AimG-mod - 1
+  ]
+
+  ask districts [
+    let a D-No
+    let Dt-area count patches with [N-district = a and lu = 6] ;; road area
+    set Di-area count patches with [N-district = a and lu = 2]
+    set Di precision (Di-area / (D-area - Dt-area) * 100) 2
+    set Dc-area count patches with [N-district = a and lu = 3]
+    set Dc precision (Dc-area / (D-area - Dt-area) * 100) 2
+    set Do-area count patches with [N-district = a and lu = 4]
+    set Do precision (Do-area / (D-area - Dt-area) * 100) 2
+    set Dg-area count patches with [N-district = a and lu = 5]
+    set Dg precision (Dg-area / (D-area - Dt-area) * 100) 2
+    set Drh-area count patches with [N-district = a and lu = 1.5]
+    set Drh precision (Drh-area / (D-area - Dt-area) * 100) 2
+    set Drl-area count patches with [N-district = a and lu = 1]
+    set Drl precision (Drl-area / (D-area - Dt-area) * 100) 2
+    set Dr-area Drh-area + Drl-area
+    set Dr precision (Dr-area / (D-area - Dt-area) * 100) 2
+    set D-pop precision (D-residentials / (D-area * resolution ^ 2 / 1000000)) 2
+    set D-residentials round D-residentials
+
+    set landuses 0
+    let EDr 0 let EDi 0 let EDc 0 let EDo 0 let EDg 0
+    if Di > 0 [
+      set landuses landuses + 1
+      set EDi Di / 100 * ln (Di / 100)
+    ]
+    if Dr > 0 [
+      set landuses landuses + 1
+      set EDr Dr / 100 * ln (Dr / 100)
+    ]
+    if Dc > 0 [
+      set landuses landuses + 1
+      set EDc Dc / 100 * ln (Dc / 100)
+    ]
+    if Do > 0 [
+      set landuses landuses + 1
+      set EDo Do / 100 * ln (Do / 100)
+    ]
+    if Dg > 0 [
+      set landuses landuses + 1
+      set EDg Dg / 100 * ln (Dg / 100)
+    ]
+    set Entropy -1 * (EDr + EDi + EDc + EDo + EDg) / ln 5
+  ]
+end
+
+to allocate-industrial [AimI]
+  evaluate-industrial
+  ask districts [
+    set D-empty count patches with [N-district = [D-No] of myself and lu = 0]
+    ifelse D-empty > 0 [
+      set allocated? 0
+    ]
+    [ set allocated? 1]
+  ]
+  allocate-patches AimI 1 2 blue Dispersion-D-I
+end
+
+to evaluate-industrial
+  let dispersion min list Dispersion-D-I (count districts)
+  ask districts [set D-suitability 0]
+  ;; near highways
+
+  ;; land value: High=-1, Low=1.
+  ask min-n-of dispersion districts [distancexy 0 0] [  ;; High land value, short distance
+    set D-suitability D-suitability - 1 ]
+  ask max-n-of dispersion districts [distancexy 0 0] [  ;; Low land value, long distance
+    set D-suitability D-suitability + 1 ]
+  ;;population density: High=-1, Low=1
+  ask max-n-of dispersion districts [D-pop] [  ;; High density, relatively
+    set D-suitability D-suitability - 1 ]
+  ask min-n-of dispersion districts [D-pop] [  ;; Low density, relatively
+    set D-suitability D-suitability + 1 ]
+  ;;surroundings: Industry
+  ask districts with [any? patches with [N-district = [D-No] of myself and lu = 2] ] [
+    set D-suitability D-suitability + 2]  ;;Industry: clustering
+end
+
+to allocate-patches [aim maxper luvalue lucolor Dispersion-LU]
+  let available-D count districts with [allocated? = 0]
+  let dispersion min list Dispersion-LU available-D
+  if dispersion <= 0 [ set dispersion 1 ]
+  let aim-int int (aim / dispersion)
+  let aim-mod (aim mod dispersion)
+
+  if aim-int > 0 and available-D > 0[
+    ask max-n-of dispersion districts with [allocated? = 0] [D-suitability] [
+      let available-patches min list (D-area * maxper) D-empty
+      ifelse available-patches > aim-int [ ;; allocate aim-int
+        ask n-of aim-int patches with [N-district = [D-No] of myself and lu = 0] [
+          set lu luvalue
+          set pcolor lucolor
+        ]
+        set D-empty D-empty - aim-int
+      ]
+      [ ;; available-patches <= aim-int, allocate available-patches
+        ask n-of available-patches patches with [N-district = [D-No] of myself and lu = 0] [
+          set lu luvalue
+          set pcolor lucolor
+        ]
+        set D-empty 0
+        set allocated? 1
+        set available-D available-D - 1
+        set aim-mod aim-mod + aim-int - available-patches
+      ]
+    ]
+  ]
+  while [aim-mod > 0 and available-D > 0] [
+    ask max-one-of districts with [allocated? = 0] [D-suitability] [
+      let available-patches min list (D-area * maxper) D-empty
+      ifelse available-patches > aim-mod [ ;; allocate aim-mod
+        ask n-of aim-mod patches with [N-district = [D-No] of myself and lu = 0] [
+          set lu luvalue
+          set pcolor lucolor
+        ]
+        set D-empty D-empty - aim-mod
+        set aim-mod 0
+      ]
+      [ ;; available-patches <= aim-mod, allocate available-patches
+        ask n-of available-patches patches with [N-district = [D-No] of myself and lu = 0] [
+          set lu luvalue
+          set pcolor lucolor
+        ]
+        set D-empty 0
+        set allocated? 1
+        set available-D available-D - 1
+        set aim-mod aim-mod - available-patches
+      ]
+    ]
+  ]
+  if aim-mod > 0 and available-D <= 0 [
+    show (word "District-level: Not enough space for land use " luvalue " and " aim-mod " patches are dropped!")
+  ]
+end
+
+to allocate-commercial [AimC]
+  evaluate-commercial
+  ask districts [
+    set D-empty count patches with [N-district = [D-No] of myself and lu = 0]
+    ifelse D-empty > 0 [
+      set allocated? 0
+    ]
+    [ set allocated? 1]
+  ]
+  allocate-patches AimC 1 3 red Dispersion-D-C
+end
+
+to evaluate-commercial
+  ask districts [set D-suitability 0]
+  let dispersion min list Dispersion-D-C (count districts)
+  ;;Distance to Highway
+
+  ;; land value: High = 2, Low = -2
+  ask min-n-of dispersion districts [distancexy 0 0] [  ;; High land value, short distance
+    set D-suitability D-suitability + 2 ]
+  ask max-n-of dispersion districts [distancexy 0 0] [  ;; Low land value, long distance
+    set D-suitability D-suitability - 2 ]
+  ;; population density: High = 2, Low = -2
+  ask max-n-of dispersion districts [D-pop] [  ;; High density, relatively
+    set D-suitability D-suitability + 2 ]
+  ask min-n-of dispersion districts [D-pop] [  ;; Low density, relatively
+    set D-suitability D-suitability - 2 ]
+  ;; surroundings: Commerce, Office
+  ask districts with [any? patches with [N-district = [D-No] of myself and lu = 3] ] [
+    set D-suitability D-suitability + 1]  ;; Commerce: clustering
+  ask districts with [any? patches with [N-district = [D-No] of myself and lu = 4] ] [
+    set D-suitability D-suitability + 1]  ;; Office: attraction
+end
+
+to allocate-office [AimO]
+  evaluate-office
+  ask districts [
+    set D-empty count patches with [N-district = [D-No] of myself and lu = 0]
+    ifelse D-empty > 0 [
+      set allocated? 0
+    ]
+    [ set allocated? 1]
+  ]
+  allocate-patches AimO 1 4 pink Dispersion-D-O
+end
+
+to evaluate-office
+  ask districts [set D-suitability 0]
+  let dispersion min list Dispersion-D-O (count districts)
+  ;;Distance to Highway
+
+  ;; land value: High = 2, Medium & Low = 0
+  ask min-n-of dispersion districts [distancexy 0 0] [  ;; High land value, short distance
+    set D-suitability D-suitability + 2 ]
+  ;; surroundings: Commerce, Office
+  ask districts with [any? patches with [N-district = [D-No] of myself and lu = 3] ] [
+    set D-suitability D-suitability + 1]  ;; Commerce: attraction
+  ask districts with [any? patches with [N-district = [D-No] of myself and lu = 4] ] [
+    set D-suitability D-suitability + 1]  ;; Office: clustering
+end
+
+to allocate-green&open [AimG]
+  evaluate-green&open
+  ask districts [
+    set D-empty count patches with [N-district = [D-No] of myself and lu = 0]
+    ifelse D-empty > 0 [
+      set allocated? 0
+    ]
+    [ set allocated? 1]
+  ]
+  allocate-patches AimG 1 5 green Dispersion-D-G
+end
+
+to evaluate-green&open
+  ask districts [set D-suitability 0]
+  let dispersion min list Dispersion-D-G (count districts)
+  ;;Distance to Highway
+
+  ;; land value: High = -1, Low = +1
+  ask min-n-of dispersion districts [distancexy 0 0] [  ;; High land value, short distance
+    set D-suitability D-suitability - 1 ]
+  ask max-n-of dispersion districts [distancexy 0 0] [  ;; Low land value, long distance
+    set D-suitability D-suitability + 1 ]
+  ;; population density: High = 0, Low = 1
+  ask min-n-of dispersion districts [D-pop] [  ;; Low density, relatively
+    set D-suitability D-suitability + 1 ]
+  ;; surroundings: Industry
+  ask districts with [any? patches with [N-district = [D-No] of myself and lu = 2] ] [
+    set D-suitability D-suitability + 1]  ;; Industry: attraction
+end
+
+to allocate-residential [AimR AimHigh AimLow]
+  ask districts [set p-wait D-residentials]
+
+  ;; allocate CBD.
+  ask districts with [D-type = 1] [
+    ifelse p-wait >= round AimHigh * Dhigh [ ;; all AimHigh are allocated
+      ask n-of AimHigh patches with [N-district = [D-No] of myself and lu = 0] [
+        set lu 1.5
+        set pcolor orange
+      ]
+      set AimHigh 0
+      set p-wait round (p-wait - AimHigh * Dhigh)
+      let need-low round p-wait / Dlow
+      ask n-of need-low patches with [N-district = [D-No] of myself and lu = 0] [
+        set lu 1
+        set pcolor yellow
+      ]
+      set p-wait 0
+      set AimLow AimLow - need-low
+    ]
+    [;; p-wait < AimHigh * Dhigh, all are high
+      let need-high round p-wait / Dhigh
+      ask n-of need-high patches with [N-district = [D-No] of myself and lu = 0] [
+        set lu 1.5
+        set pcolor orange
+      ]
+      set p-wait 0
+      set AimHigh AimHigh - need-high
+    ]
+  ]
+
+  ;; allocate historic area
+  ask districts with [D-type = 2] [
+    ifelse p-wait >= round AimLow * Dlow [ ;; all AimLow are allocated
+      ask n-of AimLow patches with [N-district = [D-No] of myself and lu = 0] [
+        set lu 1
+        set pcolor yellow
+      ]
+      set AimLow 0
+      set p-wait round (p-wait - AimLow * Dlow)
+      let need-high round p-wait / Dhigh
+      ask n-of need-high patches with [N-district = [D-No] of myself and lu = 0] [
+        set lu 1.5
+        set pcolor orange
+      ]
+      set p-wait 0
+      set AimHigh AimHigh - need-high
+    ]
+    [;; p-wait < AimLow * Dlow, all are low
+      let need-low round p-wait / Dlow
+      ask n-of need-low patches with [N-district = [D-No] of myself and lu = 0] [
+        set lu 1
+        set pcolor yellow
+      ]
+      set p-wait 0
+      set AimLow AimLow - need-low
+    ]
+  ]
+
+  ;; allocate normal districts
+  let num-p sum [D-residentials] of districts with [D-type = 0]
+  ask districts with [D-type = 0] [
+    let need-high round AimHigh / num-p * p-wait
+    ask n-of need-high patches with [N-district = [D-No] of myself and lu = 0] [
+      set lu 1.5
+      set pcolor orange
+    ]
+    set p-wait p-wait - round need-high * Dhigh
+    let need-low round p-wait / Dlow
+    ask n-of need-low patches with [N-district = [D-No] of myself and lu = 0] [
+      set lu 1
+      set pcolor yellow
+    ]
+  ]
+
+  let real-r count patches with [lu = 1 or lu = 1.5]
+  if real-r > AimR [
+    ask min-one-of districts with [D-type = 0] [D-pop] [
+      ask n-of (real-r - AimR) patches with [N-district = [D-No] of myself and (lu = 1 or lu = 1.5)] [
+        set lu 0
+        set pcolor black
+      ]
+    ]
+  ]
+  if real-r < AimR [
+    ask max-one-of districts with [D-type = 0] [D-pop] [
+      ask n-of (AimR - real-r) patches with [N-district = [D-No] of myself and lu = 0] [
+        set lu 1
+        set pcolor yellow
+      ]
+    ]
+  ]
+end
+
+
+
+;;;;;;;;;;;;;;;;;;
+;; distributors ;;
+;;;;;;;;;;;;;;;;;;
+
+
+
+to build-distributor
+
+  if RoadPattern = "Radial" [  ]
+
+  if RoadPattern = "Checker" [
+    ;;let Num-D 3
+
+    create-ordered-distributors 4 [
+      set RoadGrade 3
+      let n Num-D / 2
+      if (remainder Num-D 2) = 1 [
+        set n int n + 1
+        fd DistanceDistributors / 2
+      ]
+      while [urban = true] [
+        if (remainder Num-D 2) = 0 [
+          Build_Segment DistanceDistributors
+          set n n + 1
+        ]
+        if (remainder n Num-D) != 0 [
+          hatch 1 [
+            rt 90
+            while [urban = true] [Build_Segment DistanceDistributors]
+            die
+          ]
+          hatch 1 [
+            lt 90
+            while [urban = true] [Build_Segment DistanceDistributors]
+            die
+          ]
+        ]
+        if (remainder Num-D 2) = 1 [
+          fd DistanceDistributors
+          set n n + 1
+        ]
+      ]
+      die
+    ]
+  ]
+
+  ask patches with [count distributors-here > 1] [
+    let a 0
+    ask one-of distributors-here [set a who]
+    ask distributors-here with [who != a] [
+      ask link-neighbors [ create-templink-with turtle a ]
+      die ]
+  ]
+
+  ask distributors [ set color orange ]
+  ask templinks [
+    set breed distributorlinks
+    set color orange ]
+end
+
+
+
+to radial-IG
+  facexy 0 0
+  let r distancexy 0 0
+  let angleL 0
+  let angleR 0
+  set temporary N-district
+  hatch-distributors 1 [
+    set RoadGrade 3
+    rt 90
+    dis-ring-left r
+    facexy 0 0
+    set angleL heading ;; angle left
+    die
+  ]
+  hatch-distributors 1 [
+    set RoadGrade 3
+    lt 90
+    dis-ring-right r
+    facexy 0 0
+    set angleR heading ;; angle right
+    die
+  ]
+  let angle angleR - angleL
+  if angle < 0 [ set angle angle + 360]
+  ;; N-R: number of radials
+  let N-R round ((r * pi * angle / 180) / (DistanceArterials / 2) - 1)
+  if N-R < 0 [set N-R 0]
+  let perangle angle / (N-R + 1)  ;; angle between two distributor-radials
+  dis-radials angleL perangle N-R r
+end
+
+to radial-R
+  facexy 0 0
+  let r distancexy 0 0
+  let angleL 0
+  let angleR 0
+  set temporary N-district
+  hatch-distributors 1 [
+    set RoadGrade 3
+    rt 90
+    dis-ring-left r
+    facexy 0 0
+    set angleL heading
+    die
+  ]
+  hatch-distributors 1 [
+    set RoadGrade 3
+    lt 90
+    dis-ring-right r
+    facexy 0 0
+    set angleR heading
+    die
+  ]
+  let angle angleR - angleL
+  if angle < 0 [ set angle angle + 360]
+  let N-R round ((r * pi * angle / 180) / (DistanceArterials / 3) - 1)
+  if N-R < 0 [set N-R 0]
+  let perangle angle / (N-R + 1)  ;; angle between two distributor-radials
+  dis-radials angleL perangle N-R r
+end
+
+to radial-CO
+  facexy 0 0
+  let r distancexy 0 0
+  let angleL 0
+  let angleR 0
+  set temporary N-district
+  hatch-distributors 1 [
+    set RoadGrade 3
+    fd DistanceArterials / 6
+    rt 90
+    dis-ring-left r
+    facexy 0 0
+    set angleL heading
+    die
+  ]
+  hatch-distributors 1 [
+    set RoadGrade 3
+    fd DistanceArterials / 6
+    lt 90
+    dis-ring-right r
+    facexy 0 0
+    set angleR heading
+    die
+  ]
+  hatch-distributors 1 [
+    set RoadGrade 3
+    bk DistanceArterials / 6
+    rt 90
+    dis-ring-left r
+    die
+  ]
+  hatch-distributors 1 [
+    set RoadGrade 3
+    bk DistanceArterials / 6
+    lt 90
+    dis-ring-right r
+    die
+  ]
+  let angle angleR - angleL
+  if angle < 0 [ set angle angle + 360]
+  let N-R round ((r * pi * angle / 180) / (DistanceArterials / 3) - 1)
+  if N-R < 0 [set N-R 0]
+  let perangle angle / (N-R + 1)  ;; angle between two distributor-radials
+  dis-radials angleL perangle N-R r
+end
+
+
+
+to dis-ring-left [r]
+  let px0 [pxcor] of patch-here
+  let py0 [pycor] of patch-here
+  let px [pxcor] of patch-here
+  let py [pycor] of patch-here
+  set road RoadGrade
+  let a 0
+  hatch 1 [
+    move-to patch-here
+    set a who ]
+
+  let step 0.2
+  let theta step * 360 / (2 * pi * r) / 2
+  while [temporary = N-district] [
+    lt theta
+    fd step
+    lt theta
+    set px [pxcor] of patch-here
+    set py [pycor] of patch-here
+    if px != px0 or py != py0 [
+      set road RoadGrade
+      hatch 1 [
+        move-to patch-here
+        create-templink-with turtle a
+        set a who
+      ]
+      set px0 px
+      set py0 py
+    ]
+  ]
+end
+
+to dis-ring-right [r]
+  let px0 [pxcor] of patch-here
+  let py0 [pycor] of patch-here
+  let px [pxcor] of patch-here
+  let py [pycor] of patch-here
+  set road RoadGrade
+  let a 0
+  hatch 1 [
+    move-to patch-here
+    set a who ]
+
+  let step 0.2
+  let theta step * 360 / (2 * pi * r) / 2
+  while [temporary = N-district] [
+    rt theta
+    fd step
+    rt theta
+    set px [pxcor] of patch-here
+    set py [pycor] of patch-here
+    if px != px0 or py != py0 [
+      set road RoadGrade
+      hatch 1 [
+        move-to patch-here
+        create-templink-with turtle a
+        set a who
+      ]
+      set px0 px
+      set py0 py
+    ]
+  ]
+end
+
+to dis-radials [angleL perangle N-R r]
+  if N-R >= 1 [
+    hatch-distributors 1 [
+      set RoadGrade 3
+      setxy 0 0
+      set heading angleL
+      rt 180 + perangle
+      fd r
+      hatch 1 [
+        set RoadGrade 3
+        rt 180
+        set angleL heading
+        Build_DisSegment
+        die
+      ]
+      Build_DisSegment
+      die
+    ]
+    set N-R N-R - 1
+    dis-radials angleL perangle N-R r
+  ]
+end
+
+
+
+
+to checker-IG
+  set temporary N-district
+  hatch-distributors 1 [
+    set heading 0
+    set RoadGrade 3
+    hatch 1 [
+      rt 90
+      set RoadGrade 3
+      hatch 1 [
+        rt 90
+        set RoadGrade 3
+        hatch 1 [
+          rt 90
+          set RoadGrade 3
+          Build_DisSegment
+          die ]
+        Build_DisSegment
+        die ]
+      Build_DisSegment
+      die ]
+    Build_DisSegment
+    die
+  ]
+end
+
+to checker-R
+  set temporary N-district
+  hatch-distributors 1 [
+    set heading 0
+    set RoadGrade 3
+    hatch 1 [
+      rt 180
+      set RoadGrade 3
+      Build_DisSegment
+      die ]
+    Build_DisSegment
+    die
+  ]
+  ask patch-at-heading-and-distance 0 (1 / 6 * DistanceArterials) [
+    sprout-distributors 1 [
+      set heading 90
+      set RoadGrade 3
+      set temporary N-district
+      hatch 1 [
+        rt 180
+        set RoadGrade 3
+        Build_DisSegment
+        die ]
+      Build_DisSegment
+      die ]
+  ]
+  ask patch-at-heading-and-distance 180 (1 / 6 * DistanceArterials) [
+    sprout-distributors 1 [
+      set heading 90
+      set RoadGrade 3
+      set temporary N-district
+      hatch 1 [
+        rt 180
+        set RoadGrade 3
+        Build_DisSegment
+        die ]
+      Build_DisSegment
+      die ]
+  ]
+end
+
+to checker-CO
+  ask patch-at (1 / 6 * DistanceArterials) (1 / 6 * DistanceArterials) [
+    sprout-distributors 1 [
+      set heading 0
+      set RoadGrade 3
+      set temporary N-district
+      hatch 1 [
+        rt 90
+        set RoadGrade 3
+        hatch 1 [
+          rt 90
+          set RoadGrade 3
+          hatch 1 [
+            rt 90
+            set RoadGrade 3
+            Build_DisSegment die ]
+          Build_DisSegment die ]
+        Build_DisSegment die ]
+      Build_DisSegment die ]
+  ]
+  ask patch-at (-(1 / 6 * DistanceArterials)) (-(1 / 6 * DistanceArterials)) [
+    sprout-distributors 1 [
+      set heading 0
+      set RoadGrade 3
+      set temporary N-district
+      hatch 1 [
+        rt 90
+        set RoadGrade 3
+        hatch 1 [
+          rt 90
+          set RoadGrade 3
+          hatch 1 [
+            rt 90
+            set RoadGrade 3
+            Build_DisSegment die ]
+          Build_DisSegment die ]
+        Build_DisSegment die]
+      Build_DisSegment die]
+  ]
+end
+
+to Inter-City
+  create-ordered-roadnodes 4 [
+    fd 1.2 * CityRadius
+    create-highwaylink-with min-one-of other roadnodes [distance myself] [
+      set RoadLength 100
+    ]
+  ]
+end
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;
+;; Public Transport ;;
+;;;;;;;;;;;;;;;;;;;;;;
+
+to build-PT
+  ask stations [die]
+  let connections 0
+  let file "PTlines.dat"
+  if file-exists? file [file-delete file]
+
+  ;; PT of Checker
+  if RoadPattern = "Checker" [
+    ;; to find out terminals along arterials
+    ask arterials with [(count my-arteriallinks = 2 and any? arteriallink-neighbors with [ ycor != [ycor] of myself and xcor != [xcor] of myself ]) or count my-arteriallinks = 1] [
+      if any? arteriallink-neighbors with [ ycor > [ycor] of myself and xcor = [xcor] of myself ] [
+        set heading 0 ]
+      if any? arteriallink-neighbors with [ ycor = [ycor] of myself and xcor > [xcor] of myself ] [
+        set heading 90 ]
+      if any? arteriallink-neighbors with [ ycor < [ycor] of myself and xcor = [xcor] of myself ] [
+        set heading 180 ]
+      if any? arteriallink-neighbors with [ ycor = [ycor] of myself and xcor < [xcor] of myself ] [
+        set heading 270 ]
+      hatch-stations 1 [ set terminal true ]
+    ]
+    ;; to find out terminals along distributors
+    ask distributors with [(count my-distributorlinks = 2 and any? distributorlink-neighbors with [ ycor != [ycor] of myself and xcor != [xcor] of myself ]) or count my-distributorlinks = 1] [
+      if any? distributorlink-neighbors with [ ycor > [ycor] of myself and xcor = [xcor] of myself ] [
+        set heading 0 ]
+      if any? distributorlink-neighbors with [ ycor = [ycor] of myself and xcor > [xcor] of myself ] [
+        set heading 90 ]
+      if any? distributorlink-neighbors with [ ycor < [ycor] of myself and xcor = [xcor] of myself ] [
+        set heading 180 ]
+      if any? distributorlink-neighbors with [ ycor = [ycor] of myself and xcor < [xcor] of myself ] [
+        set heading 270 ]
+      hatch-stations 1 [set terminal true]
+    ]
+
+    ;;to build PT lines and stations from terminals
+    file-open file
+    ask stations with [terminal = true] [
+      let stationlist []
+      set stationlist lput who stationlist
+      let laststation who
+      let end-terminal 0
+      ;; to search another terminal of a line
+      if heading = 0 or heading = 180 [
+        ask other stations with [terminal = true and xcor = [xcor] of myself and (heading = 0 or heading = 180)] [
+          set end-terminal who ]
+      ]
+      if heading = 90 or heading = 270 [
+        ask other stations with [terminal = true and ycor = [ycor] of myself and (heading = 90 or heading = 270)] [
+          set end-terminal who ]
+      ]
+
+      ;; to build from one terminal
+      hatch 1 [
+        ;;to build stations
+        while [laststation != end-terminal] [
+          ifelse distance station end-terminal >= BusSpace / resolution [
+            fd BusSpace / Resolution
+            hatch 1 [
+              set terminal false
+              set stationlist lput who stationlist
+              set laststation who
+            ]
+          ]
+          [;; The condition that distance to end-terminal is less than 500 meters. Next station is the end terminal.
+            set stationlist lput end-terminal stationlist
+            set laststation end-terminal
+          ]
+        ]
+        die
+      ]
+
+      set connections (length stationlist) - 2 + connections
+      foreach stationlist [ x -> file-write x ]
+      file-write 0
+    ]
+    file-close
+
+    let file2 "connections.dat"
+    if file-exists? file2 [file-delete file2]
+    file-open file2
+    file-print connections
+    file-close
+  ]
+
+
+  ;; PT of Radial
+  if RoadPattern = "Radial"[]
+
+end
+
+
+to output-PT
+  ;; PT stations
+  file-close-all
+  let file1 "basic_stations.dat"
+  if file-exists? file1 [file-delete file1]
+  file-open file1
+  file-print count stations
+  let a 0
+  ask stations [
+    set ptID a
+    set a a + 1
+    file-type ptID
+    file-write round (xcor * resolution)
+    file-write round (ycor * resolution)
+    file-print ""
+  ]
+  file-close
+
+  ;;Bus Timetable
+  let timelist_bus []
+  let t 60 * 6 + 0  ;;first bus
+  while [t <= 60 * 24 + 0] [
+    set timelist_bus lput t timelist_bus
+    set t t + BusTime  ;;time interval
+  ]
+
+  ;;Bus basic connections
+  file-open "connections.dat"
+  let connections file-read
+  file-close
+  let basic-connections connections * length timelist_bus
+  let file2 "basic_connections.dat"
+  if file-exists? file2 [file-delete file2]
+  file-open file2
+  file-print basic-connections
+  let routeID 0
+  let lineNum 0
+  let dstop 0
+  let astop 0
+  let dtime 0
+  let atime 0
+  let stationlist_route []
+  file-open "PTlines.dat"
+  while [not file-at-end?] [
+    set stationlist_route []
+    set astop file-read
+    while [astop != 0] [
+      set stationlist_route lput astop stationlist_route
+      set astop file-read
+    ]
+    set routeID routeID + 1
+    set lineNum 0
+    foreach timelist_bus [ ti ->
+      set dstop 0
+      foreach stationlist_route [ s ->
+        ifelse dstop = 0 [
+          set dstop s
+          set dtime ti
+        ]
+        [
+          set astop s
+          set atime dtime + 1
+          file-open file2
+          file-type [ptID] of station dstop
+          file-write [ptID] of station astop
+          file-write dtime
+          file-write atime
+          file-write routeID
+          file-write lineNum
+          file-print ""
+          set dstop astop
+          set dtime atime
+        ]
+      ]
+      set lineNum lineNum + 1
+    ]
+    file-open "PTlines.dat"
+  ]
+  file-close-all
+end
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;
+;; Neighbourhood Part ;;
+;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+to build-neighbourhoods
+  ask patches with [urban = true and road = 0 and N-neighbourhood = 0] [set pcolor cyan]
+  add-an-neighbourhood 1
+  let max-area max [N-area] of neighbourhoods
+  let min-area max-area * Min-N
+  if any? neighbourhoods with [N-area < min-area] [
+    ask neighbourhoods with [N-area < min-area] [
+      let aim-N -1
+      ask min-one-of other neighbourhoods with [D-No = [D-No] of myself] [distance myself] [
+        set aim-N N-No
+      ]
+      ask patches with [N-neighbourhood = [N-No] of myself] [
+        set N-neighbourhood aim-N
+      ]
+      ask one-of neighbourhoods with [N-No = aim-N] [
+        set N-area count patches with [N-neighbourhood = aim-N]
+      ]
+      die
+    ]
+  ]
+
+  recode-neighbourhood
+end
+
+
+to add-an-neighbourhood [code]
+  ask one-of patches with [urban = true and road = 0 and N-neighbourhood = 0] [
+    set N-neighbourhood code
+    while [any? patches with [N-neighbourhood = code and pcolor = cyan] ] [
+      ask patches with [N-neighbourhood = code and pcolor = cyan] [
+        ask neighbors4 [
+          if urban = true and road = 0 and N-neighbourhood = 0 [ set N-neighbourhood code ]
+        ]
+        set pcolor black
+      ]
+    ]
+
+    sprout-neighbourhoods 1 [
+      set size 2
+      set color red
+      set N-No code
+      setxy (mean [pxcor] of patches with [N-neighbourhood = code]) (mean [pycor] of patches with [N-neighbourhood = code])
+      set N-area count patches with [N-neighbourhood = code]
+      set D-No [N-district] of patch-here
+    ]  ]
+  if any? patches with [urban = true and road = 0 and N-neighbourhood = 0] [
+    set code code + 1
+    add-an-neighbourhood code
+  ]
+end
+
+;; recode from 1
+to recode-neighbourhood
+  let num-N count neighbourhoods
+  let temp 1
+  while [temp <= num-N] [
+    if not any? neighbourhoods with [N-No = temp] [
+      ask one-of neighbourhoods with [N-No > num-N] [
+        let code N-No
+        ask patches with [N-neighbourhood = code] [set N-neighbourhood temp]
+        set N-No temp
+      ]
+    ]
+    set temp temp + 1
+  ]
+end
+
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Land use on Neighbourhoods ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+
+to landuse-neighbourhoods
+  ;;reset lu
+  ask patches with [urban = true] [
+    ifelse road = 0 [
+      set lu 0 ]
+    [
+      set lu 6]
+  ]
+  ask neighbourhoods [
+    let a N-No
+    set N-empty count patches with [N-neighbourhood = a and lu = 0]
+    set D-pop mean [pop] of patches with [N-neighbourhood = [N-No] of myself]
+    set N-residentials round (D-pop * N-area * resolution ^ 2 / 1000000)
+    set p-wait N-residentials
+  ]
+
+  ;;allocation
+  ask districts [
+    let AimI di-area
+    let AimI-int int (AimI / Allocation-Rounds-N)
+    let AimI-mod (AimI mod Allocation-Rounds-N)
+    let AimC dc-area
+    let AimC-int int (AimC / Allocation-Rounds-N)
+    let AimC-mod (AimC mod Allocation-Rounds-N)
+    let AimO do-area
+    let AimO-int int (AimO / Allocation-Rounds-N)
+    let AimO-mod (AimO mod Allocation-Rounds-N)
+    let AimG dg-area
+    let AimG-int int (AimG / Allocation-Rounds-N)
+    let AimG-mod (AimG mod Allocation-Rounds-N)
+    let AimHigh drh-area
+    let AimLow drl-area
+    let AimR dr-area
+    let AimR-int int (AimR / Allocation-Rounds-N)
+    let AimR-mod (AimR mod Allocation-Rounds-N)
+
+    let Allocation-Rounds Allocation-Rounds-N
+    while [Allocation-Rounds > 0] [
+
+      if AimI > 0 [allocate-industrial-nei D-No (AimI-int + ifelse-value (AimI-mod > 0) [1] [0] )]
+
+      if AimC > 0 [allocate-commercial-nei D-No (AimC-int + ifelse-value (AimC-mod > 0) [1] [0] )]
+      if AimO > 0 [allocate-office-nei D-No (AimO-int + ifelse-value (AimO-mod > 0) [1] [0] )]
+
+      set AimR AimR-int + ifelse-value (AimR-mod > 0) [1] [0]
+      if AimR > 0 [
+        ifelse AimHigh > 0 [
+          ifelse AimHigh >= AimR [
+            allocate-residential-nei D-No AimR 1
+            set AimHigh AimHigh - AimR
+          ]
+          [ ;; AimHigh < AimR, allocate High & Low
+            allocate-residential-nei D-No AimHigh 1
+            allocate-residential-nei D-No (AimR - AimHigh) 0
+            set AimHigh 0
+          ]
+        ]
+        [allocate-residential-nei D-No AimR 0]
+      ]
+
+      if AimG > 0 [allocate-green&open-nei D-No (AimG-int + ifelse-value (AimG-mod > 0) [1] [0] )]
+
+
+      set Allocation-Rounds Allocation-Rounds - 1
+      set AimI-mod AimI-mod - 1
+      set AimC-mod AimC-mod - 1
+      set AimR-mod AimR-mod - 1
+      set AimO-mod AimO-mod - 1
+      set AimG-mod AimG-mod - 1
+    ]
+  ]
+
+  ;; eliminate black patches
+  ;;while [any? patches with [urban = true and lu = 0]] [
+    ;;ask patches with [urban = true and lu = 0] [
+      ;;let a N-neighbourhood
+      ;;let luvalue 0
+      ;;let lucolor 0
+      ;;ask one-of neighbors4 with [N-neighbourhood = a] [
+        ;;set luvalue lu
+        ;;set lucolor pcolor
+      ;;]
+      ;;set lu luvalue
+      ;;set pcolor lucolor
+    ;;]
+  ;;]
+
+  ;; count types of land uses
+  ask neighbourhoods [
+    let a N-No
+    let Ni-area count patches with [N-neighbourhood = a and lu = 2]
+    set Ni precision (Ni-area / N-area * 100) 1
+    let Nc-area count patches with [N-neighbourhood = a and lu = 3]
+    set Nc precision (Nc-area / N-area * 100) 1
+    let No-area count patches with [N-neighbourhood = a and lu = 4]
+    set No precision (No-area / N-area * 100) 1
+    let Ng-area count patches with [N-neighbourhood = a and lu = 5]
+    set Ng precision (Ng-area / N-area * 100) 1
+    let Nr-area count patches with [N-neighbourhood = a and (lu = 1 or lu = 1.5)]
+    let Nrh-area count patches with [N-neighbourhood = a and lu = 1.5]
+    let Nrl-area count patches with [N-neighbourhood = a and lu = 1]
+    set Nrh precision (Nrh-area / N-area * 100) 1
+    set Nrl precision (Nrl-area / N-area * 100) 1
+    set Nr precision (Nr-area / N-area * 100) 1
+    set N-residentials round (Dhigh * Nrh-area + Dlow * Nrl-area)
+    set D-pop precision (N-residentials / (N-area * resolution ^ 2 / 1000000)) 3
+
+    set landuses 0
+    let ENr 0 let ENi 0 let ENc 0 let ENo 0 let ENg 0
+    if Ni > 0 [
+      set landuses landuses + 1
+      set ENi Ni / 100 * ln (Ni / 100)
+    ]
+    if Nr > 0 [
+      set landuses landuses + 1
+      set ENr Nr / 100 * ln (Nr / 100)
+    ]
+    if Nc > 0 [
+      set landuses landuses + 1
+      set ENc Nc / 100 * ln (Nc / 100)
+    ]
+    if No > 0 [
+      set ENo No / 100 * ln (No / 100)
+      set landuses landuses + 1
+    ]
+    if Ng > 0 [
+      set ENg Ng / 100 * ln (Ng / 100)
+      set landuses landuses + 1
+    ]
+    set Entropy -1 * (ENr + ENi + ENc + ENo + ENg) / ln 5
+  ]
+end
+
+to allocate-industrial-nei [Num AimI]
+  evaluate-industrial-nei Num
+  allocate-patches-nei Num AimI 2 blue Dispersion-N-I
+end
+
+to evaluate-industrial-nei [Num]
+  ask neighbourhoods with [D-No = Num] [set N-suitability 0]
+  let Dispersion-N (count neighbourhoods with [D-No = Num]) / 3
+  set Dispersion-N round Dispersion-N
+  if Dispersion-N = 0 [set Dispersion-N 1]
+  let dispersion min list Dispersion-N (count neighbourhoods with [D-No = Num and N-empty > 0])
+  ;; near highways
+
+  ;; land value: high = -1, low = 1
+  ask min-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0] [distancexy 0 0] [  ;; High land value, short distance
+    set N-suitability N-suitability - 1 ]
+  ask max-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0] [distancexy 0 0] [  ;; Low land value, long distance
+    set N-suitability N-suitability + 1 ]
+  ;; population density: High = -2, Low = 2
+  ask max-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0] [D-pop] [  ;; High density, relatively
+    set N-suitability N-suitability - 2 ]
+  ask min-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0] [D-pop] [  ;; Low density, relatively
+    set N-suitability N-suitability + 2 ]
+  ;; surroundings: Industry, Residence
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and any? patches with [N-neighbourhood = [N-No] of myself and lu = 2] ] [
+    set N-suitability N-suitability + 4]  ;; Industry-local
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and not any? patches with [N-neighbourhood = [N-No] of myself and lu = 2] ] [
+    let a false
+    ask other neighbourhoods with [distance myself < 1.3 * DistanceDistributors] [
+      if any? patches with [N-neighbourhood = [N-No] of myself and lu = 2] [
+        set a true ]
+    ]
+    if a = true [set N-suitability N-suitability + 2]
+  ]  ;; Industry-nearby
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and any? patches with [N-neighbourhood = [N-No] of myself and (lu = 1 or lu = 1.5)] ] [
+    set N-suitability N-suitability - 1]  ;; Residence-local
+end
+
+to allocate-patches-nei [Num Aim luvalue lucolor Dispersion-LU]
+  let Dispersion-N (count neighbourhoods with [D-No = Num]) * Dispersion-LU / 100
+  set Dispersion-N round Dispersion-N
+  if Dispersion-N = 0 [set Dispersion-N 1]
+  let available-N count neighbourhoods with [D-No = Num and N-empty > 0]
+  let dispersion min list Dispersion-N available-N
+  if dispersion <= 0 [
+    set dispersion 1
+    show (word "In district" Num ", dispersion = 0, " Aim " patches of lu" luvalue " do not have enough space and are dropped!")
+  ]
+  let aim-int int (Aim / dispersion)
+  let aim-mod (Aim mod dispersion)
+
+  if aim-int > 0 and available-N > 0 [
+    ask max-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0] [N-suitability] [
+      let a N-No
+      set N-empty count patches with [N-neighbourhood = a and lu = 0]
+      ifelse N-empty > aim-int [  ;;allocate aim-int
+        ask n-of aim-int patches with [N-neighbourhood = a and lu = 0] [
+          set lu luvalue
+          set pcolor lucolor
+        ]
+        set N-empty N-empty - aim-int
+      ]
+      [;;allocate N-empty
+        ask patches with [N-neighbourhood = a and lu = 0] [
+          set lu luvalue
+          set pcolor lucolor
+        ]
+        set available-N available-N - 1
+        set aim-mod aim-mod + aim-int - N-empty
+        set N-empty 0
+      ]
+    ]
+  ]
+  while [aim-mod > 0 and available-N > 0] [
+    ask max-one-of neighbourhoods with [D-No = Num and N-empty > 0] [N-suitability] [
+      let a N-No
+      ifelse N-empty > aim-mod [  ;;allocate aim-mod
+        ask n-of aim-mod patches with [N-neighbourhood = a and lu = 0] [
+          set lu luvalue
+          set pcolor lucolor
+        ]
+        set N-empty N-empty - aim-mod
+        set aim-mod 0
+      ]
+      [;;allocate N-empty
+        ask patches with [N-neighbourhood = a and lu = 0] [
+          set lu luvalue
+          set pcolor lucolor
+        ]
+        set available-N available-N - 1
+        set aim-mod aim-mod - N-empty
+        set N-empty 0
+      ]
+    ]
+  ]
+
+  if aim-mod > 0 and available-N <= 0 [
+    show (word "In district" Num " " aim-mod " patches of lu" luvalue " do not have enough space and are dropped!")
+  ]
+end
+
+to allocate-commercial-nei [Num AimC]
+  evaluate-commercial-nei Num
+  allocate-patches-nei Num AimC 3 red Dispersion-N-C
+end
+
+to evaluate-commercial-nei [Num]
+  ask neighbourhoods with [D-No = Num] [set N-suitability 0]
+  let Dispersion-N (count neighbourhoods with [D-No = Num]) / 3
+  set Dispersion-N round Dispersion-N
+  if Dispersion-N = 0 [set Dispersion-N 1]
+  let dispersion min list Dispersion-N (count neighbourhoods with [D-No = Num and N-empty > 0])
+  ;; near highways
+
+  ;; land value: high = 2, low = -2
+  ask min-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0] [distancexy 0 0] [  ;; High land value, short distance
+    set N-suitability N-suitability + 2 ]
+  ask max-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0] [distancexy 0 0] [  ;; Low land value, long distance
+    set N-suitability N-suitability - 2 ]
+  ;; population density: High = 2, Low = -2
+  ask max-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0] [D-pop] [  ;; High density, relatively
+    set N-suitability N-suitability + 2 ]
+  ask min-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0] [D-pop] [  ;; Low density, relatively
+    set N-suitability N-suitability - 2 ]
+  ;; surroundings: Commerce, Office, Green
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and any? patches with [N-neighbourhood = [N-No] of myself and lu = 3] ] [
+    set N-suitability N-suitability + 2]  ;; Commerce-local
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and not any? patches with [N-neighbourhood = [N-No] of myself and lu = 3] ] [
+    let a false
+    ask other neighbourhoods with [distance myself < 1.3 * DistanceDistributors] [
+      if any? patches with [N-neighbourhood = [N-No] of myself and lu = 3] [
+        set a true ]
+    ]
+    if a = true [set N-suitability N-suitability + 1]
+  ]  ;; Commerce-nearby
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and any? patches with [N-neighbourhood = [N-No] of myself and lu = 4] ] [
+    set N-suitability N-suitability + 2]  ;; Office-local
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and not any? patches with [N-neighbourhood = [N-No] of myself and lu = 4] ] [
+    let a false
+    ask other neighbourhoods with [distance myself < 1.3 * DistanceDistributors] [
+      if any? patches with [N-neighbourhood = [N-No] of myself and lu = 4] [
+        set a true ]
+    ]
+    if a = true [set N-suitability N-suitability + 1]
+  ]  ;; Office-nearby
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and any? patches with [N-neighbourhood = [N-No] of myself and lu = 5] ] [
+    set N-suitability N-suitability + 0.5]  ;; Green-local
+end
+
+to allocate-office-nei [Num AimO]
+  evaluate-office-nei Num
+  allocate-patches-nei Num AimO 4 pink Dispersion-N-O
+end
+
+to evaluate-office-nei [Num]
+  ask neighbourhoods with [D-No = Num] [set N-suitability 0]
+  let Dispersion-N (count neighbourhoods with [D-No = Num]) / 3
+  set Dispersion-N round Dispersion-N
+  if Dispersion-N = 0 [set Dispersion-N 1]
+  let dispersion min list Dispersion-N (count neighbourhoods with [D-No = Num and N-empty > 0])
+  ;; near highways
+
+  ;; land value: high = 2, low = -2
+  ask min-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0] [distancexy 0 0] [  ;; High land value, short distance
+    set N-suitability N-suitability + 2 ]
+  ask max-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0] [distancexy 0 0] [  ;; Low land value, long distance
+    set N-suitability N-suitability - 2 ]
+  ;; surroundings: Industry,Commerce,Office,Green
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and any? patches with [N-neighbourhood = [N-No] of myself and lu = 2] ] [
+    set N-suitability N-suitability - 1]  ;; Industry-local
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and any? patches with [N-neighbourhood = [N-No] of myself and lu = 3] ] [
+    set N-suitability N-suitability + 1]  ;; Commerce-local
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and any? patches with [N-neighbourhood = [N-No] of myself and lu = 4] ] [
+    set N-suitability N-suitability + 2]  ;; Office-local
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and not any? patches with [N-neighbourhood = [N-No] of myself and lu = 4] ] [
+    let a false
+    ask other neighbourhoods with [distance myself < 1.3 * DistanceDistributors] [
+      if any? patches with [N-neighbourhood = [N-No] of myself and lu = 4] [
+        set a true ]
+    ]
+    if a = true [set N-suitability N-suitability + 1]
+  ]  ;; Office-nearby
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and any? patches with [N-neighbourhood = [N-No] of myself and lu = 5] ] [
+    set N-suitability N-suitability + 0.5]  ;; Green-local
+end
+
+
+to allocate-residential-nei [Num AimR high?]
+  ;;immigrantion
+  ask neighbourhoods with [D-No = Num and N-empty = 0 and p-wait > 0] [
+      let migrant p-wait
+      set N-residentials N-residentials - migrant
+      set D-pop (N-residentials / (N-area * resolution ^ 2 / 1000000))
+      set p-wait 0
+      let temp distancexy 0 0
+      ask min-one-of other neighbourhoods with [D-No = Num and N-empty > 0] [abs (temp - distancexy 0 0)] [
+        set N-residentials N-residentials + migrant
+        set D-pop (N-residentials / (N-area * resolution ^ 2 / 1000000))
+        set p-wait p-wait + migrant
+      ]
+  ]
+
+  evaluate-residential-nei Num
+
+  let density ifelse-value (high? = 1) [Dhigh] [Dlow]
+  let luvalue ifelse-value (high? = 1) [1.5] [1]
+  let lucolor ifelse-value (high? = 1) [orange] [yellow]
+  let Dispersion-N (count neighbourhoods with [D-No = Num]) * Dispersion-N-R / 100
+  set Dispersion-N round Dispersion-N
+  if Dispersion-N = 0 [set Dispersion-N 1]
+  let available-N count neighbourhoods with [D-No = Num and N-empty > 0]
+  let dispersion min list Dispersion-N (count neighbourhoods with [D-No = Num and p-wait > 0])
+  if dispersion <= 0 [
+    set dispersion 1
+    show (word "In district" Num ", dispersion = 0, " AimR " patches of residential do not have enough space and are dropped!")
+  ]
+  let aim-int int (AimR / dispersion)
+  let aim-mod (AimR mod dispersion)
+
+  if aim-int > 0 and available-N > 0 [
+    ask max-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0 and p-wait > 0] [N-suitability] [
+      let need-r round (p-wait / density)
+      ifelse need-r < aim-int [ ;;try allocate need-r
+        ifelse N-empty > need-r [;; ok, allocate need-r
+          ask n-of need-r patches with [N-neighbourhood = [N-No] of myself and lu = 0] [
+            set lu luvalue
+            set pcolor lucolor
+          ]
+          set p-wait 0
+          set N-empty N-empty - need-r
+          set aim-mod aim-mod + (aim-int - need-r)
+        ]
+        [;; oh, N-empty <= need-r, allocate N-empty, and move other people
+          ask patches with [N-neighbourhood = [N-No] of myself and lu = 0] [
+            set lu luvalue
+            set pcolor lucolor
+          ]
+          set aim-mod aim-mod + (aim-int - N-empty)
+          let migrant p-wait - N-empty * density
+          set N-empty 0
+          set p-wait 0
+          set N-residentials N-residentials - migrant
+          set D-pop N-residentials / (N-area * resolution ^ 2 / 1000000)
+          ifelse any? neighbourhoods with [D-No = Num and N-empty > 0] [
+            let temp distancexy 0 0
+            ask min-one-of neighbourhoods with [D-No = Num and N-empty > 0] [abs (temp - distancexy 0 0)] [
+              set N-residentials N-residentials + migrant
+              set D-pop N-residentials / (N-area * resolution ^ 2 / 1000000)
+              set p-wait p-wait + migrant
+            ]
+          ]
+          [
+            show (word "In district " Num ", " migrant " people do not have home!")]
+        ]
+      ]
+      [;; need-r > aim-int, try allocate aim-int
+        ifelse N-empty > aim-int [;; ok, allocate aim-int
+          ask n-of aim-int patches with [N-neighbourhood = [N-No] of myself and lu = 0] [
+            set lu luvalue
+            set pcolor lucolor
+          ]
+          set p-wait p-wait - aim-int * density
+          set N-empty N-empty - aim-int
+        ]
+        [;; oh, N-empty <= aim-int, allocate N-empty
+          ask patches with [N-neighbourhood = [N-No] of myself and lu = 0] [
+            set lu luvalue
+            set pcolor lucolor
+          ]
+          set aim-mod aim-mod + (aim-int - N-empty)
+          let migrant p-wait - N-empty * density
+          set N-empty 0
+          set p-wait 0
+          set N-residentials N-residentials - migrant
+          set D-pop N-residentials / (N-area * resolution ^ 2 / 1000000)
+          ifelse any? neighbourhoods with [D-No = Num and N-empty > 0] [
+            let temp distancexy 0 0
+            ask min-one-of neighbourhoods with [D-No = Num and N-empty > 0] [abs (temp - distancexy 0 0)] [
+              set N-residentials N-residentials + migrant
+              set D-pop N-residentials / (N-area * resolution ^ 2 / 1000000)
+              set p-wait p-wait + migrant
+            ]
+          ]
+          [
+            show (word "In district " Num ", " migrant " people do not have home!")]
+        ]
+      ]
+    ]
+  ]
+  set available-N count neighbourhoods with [D-No = Num and N-empty > 0]
+
+  if available-N > 0 and aim-mod > 0 and not any? neighbourhoods with [D-No = Num and p-wait > 0] [ ;;some R are left but no more p-wait (residentials)
+    show (word "In district " Num ", " aim-mod " patches of residence are redundant and then dropped.")
+    set aim-mod 0
+  ]
+  while [aim-mod > 0 and available-N > 0] [
+    ask max-one-of neighbourhoods with [D-No = Num and N-empty > 0 and p-wait > 0] [N-suitability] [
+      let need-r round (p-wait / density)
+      ifelse need-r <= aim-mod [
+        ifelse N-empty > need-r [;; ok, allocate need-r
+          ask n-of need-r patches with [N-neighbourhood = [N-No] of myself and lu = 0] [
+            set lu luvalue
+            set pcolor lucolor
+          ]
+          set p-wait 0
+          set N-empty N-empty - need-r
+          set aim-mod aim-mod - need-r
+        ]
+        [;; oh, N-empty <= need-r, allocate N-empty, and move other people
+          ask patches with [N-neighbourhood = [N-No] of myself and lu = 0] [
+            set lu luvalue
+            set pcolor lucolor
+          ]
+          set aim-mod aim-mod - N-empty
+          let migrant p-wait - N-empty * density
+          set N-empty 0
+          set p-wait 0
+          set N-residentials N-residentials - migrant
+          set D-pop N-residentials / (N-area * resolution ^ 2 / 1000000)
+          ifelse any? neighbourhoods with [D-No = Num and N-empty > 0] [
+            let temp distancexy 0 0
+            ask min-one-of neighbourhoods with [D-No = Num and N-empty > 0] [abs (temp - distancexy 0 0)] [
+              set N-residentials N-residentials + migrant
+              set D-pop N-residentials / (N-area * resolution ^ 2 / 1000000)
+              set p-wait p-wait + migrant
+            ]
+          ]
+          [
+            show (word "In district " Num ", " migrant " people do not have home!")]
+        ]
+      ]
+      [;; need-r > aim-mod, try allocate aim-mod
+        ifelse N-empty > aim-mod [;; ok, allocate aim-mod
+          ask n-of aim-mod patches with [N-neighbourhood = [N-No] of myself and lu = 0] [
+            set lu luvalue
+            set pcolor lucolor
+          ]
+          set p-wait p-wait - aim-mod * density
+          set N-empty N-empty - aim-mod
+          set aim-mod 0
+        ]
+        [;; oh, N-empty <= aim-mod, allocate N-empty
+          ask patches with [N-neighbourhood = [N-No] of myself and lu = 0] [
+            set lu luvalue
+            set pcolor lucolor
+          ]
+          set aim-mod aim-mod - N-empty
+          let migrant p-wait - N-empty * density
+          set N-empty 0
+          set p-wait 0
+          set N-residentials N-residentials - migrant
+          set D-pop N-residentials / (N-area * resolution ^ 2 / 1000000)
+          ifelse any? neighbourhoods with [D-No = Num and N-empty > 0] [
+            let temp distancexy 0 0
+            ask min-one-of neighbourhoods with [D-No = Num and N-empty > 0] [abs (temp - distancexy 0 0)] [
+              set N-residentials N-residentials + migrant
+              set D-pop N-residentials / (N-area * resolution ^ 2 / 1000000)
+              set p-wait p-wait + migrant
+            ]
+          ]
+          [
+            show (word "In district " Num ", " migrant " people do not have home!")]
+        ]
+      ]
+    ]
+    set available-N count neighbourhoods with [D-No = Num and N-empty > 0]
+
+    if available-N = 0 [
+      if any? neighbourhoods with [D-No = Num and p-wait > 0] [
+        let temp sum [p-wait] of neighbourhoods with [D-No = Num and p-wait > 0]
+        show word temp " people do not have home!"
+      ]
+      if aim-mod > 0 [
+        show (word "In district " Num " not enough space for residence, " aim-mod " patches are dropped.")
+      ]
+    ]
+    if available-N > 0 and aim-mod > 0 and not any? neighbourhoods with [D-No = Num and p-wait > 0] [ ;;some R are left but no more p-wait (residentials)
+      show (word "In district " Num ", " aim-mod " patches of residence are redundant and then dropped.")
+      set aim-mod 0
+    ]
+  ]
+end
+
+
+to evaluate-residential-nei [Num]
+  ask neighbourhoods with [D-No = Num] [set N-suitability 0]
+  let Dispersion-N (count neighbourhoods with [D-No = Num]) / 3
+  set Dispersion-N round Dispersion-N
+  if Dispersion-N = 0 [set Dispersion-N 1]
+  let dispersion min list Dispersion-N (count neighbourhoods with [D-No = Num and N-empty > 0])
+  ;; population density: High = 4, Low = -4
+  ask max-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0] [D-pop] [  ;; High density, relatively
+    set N-suitability N-suitability + 4 ]
+  ask min-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0] [D-pop] [  ;; Low density, relatively
+    set N-suitability N-suitability - 4 ]
+  ;; surroundings: Industry, Commerce, Green
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and any? patches with [N-neighbourhood = [N-No] of myself and lu = 2] ] [
+    set N-suitability N-suitability - 4]  ;; Industry-local
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and not any? patches with [N-neighbourhood = [N-No] of myself and lu = 2] ] [
+    let a false
+    ask other neighbourhoods with [distance myself < 1.3 * DistanceDistributors] [
+      if any? patches with [N-neighbourhood = [N-No] of myself and lu = 2] [
+        set a true ]
+    ]
+    if a = true [set N-suitability N-suitability - 2]
+  ]  ;; Industry-nearby
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and any? patches with [N-neighbourhood = [N-No] of myself and lu = 3] ] [
+    set N-suitability N-suitability + 2]  ;; Commerce-local
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and not any? patches with [N-neighbourhood = [N-No] of myself and lu = 3] ] [
+    let a false
+    ask other neighbourhoods with [distance myself < 1.3 * DistanceDistributors] [
+      if any? patches with [N-neighbourhood = [N-No] of myself and lu = 3] [
+        set a true ]
+    ]
+    if a = true [set N-suitability N-suitability + 1]
+  ]  ;; Commerce-nearby
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and any? patches with [N-neighbourhood = [N-No] of myself and lu = 5] ] [
+    set N-suitability N-suitability + 2]  ;; Green-local
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and not any? patches with [N-neighbourhood = [N-No] of myself and lu = 5] ] [
+    let a false
+    ask other neighbourhoods with [distance myself < 1.3 * DistanceDistributors] [
+      if any? patches with [N-neighbourhood = [N-No] of myself and lu = 5] [
+        set a true ]
+    ]
+    if a = true [set N-suitability N-suitability + 1]
+  ]  ;; Green-nearby
+end
+
+
+to allocate-green&open-nei [Num AimG]
+  evaluate-green&open-nei Num
+  allocate-patches-nei Num AimG 5 green Dispersion-N-G
+end
+
+to evaluate-green&open-nei [Num]
+  ask neighbourhoods with [D-No = Num] [set N-suitability 0]
+  let Dispersion-N (count neighbourhoods with [D-No = Num]) / 3
+  set Dispersion-N round Dispersion-N
+  if Dispersion-N = 0 [set Dispersion-N 1]
+  let dispersion min list Dispersion-N (count neighbourhoods with [D-No = Num and N-empty > 0])
+
+  ;; land value: high = -2, low = 2
+  ask min-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0] [distancexy 0 0] [  ;; High land value, short distance
+    set N-suitability N-suitability - 2 ]
+  ask max-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0] [distancexy 0 0] [  ;; Low land value, long distance
+    set N-suitability N-suitability + 2 ]
+  ;; population density: High = -1, Low = 1
+  ask max-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0] [D-pop] [  ;; High density, relatively
+    set N-suitability N-suitability - 1 ]
+  ask min-n-of dispersion neighbourhoods with [D-No = Num and N-empty > 0] [D-pop] [  ;; Low density, relatively
+    set N-suitability N-suitability + 1 ]
+  ;; surroundings: Industry, Residence, Green
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and not any? patches with [N-neighbourhood = [N-No] of myself and lu = 2] ] [
+    let a false
+    ask other neighbourhoods with [distance myself < 1.3 * DistanceDistributors] [
+      if any? patches with [N-neighbourhood = [N-No] of myself and lu = 2] [
+        set a true ]
+    ]
+    if a = true [set N-suitability N-suitability + 1]
+  ]  ;; Industry-nearby
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and not any? patches with [N-neighbourhood = [N-No] of myself and (lu = 1 or lu = 1.5)] ] [
+    let a false
+    ask other neighbourhoods with [distance myself < 1.3 * DistanceDistributors] [
+      if any? patches with [N-neighbourhood = [N-No] of myself and (lu = 1 or lu = 1.5)] [
+        set a true ]
+    ]
+    if a = true [set N-suitability N-suitability + 1]
+  ]  ;; Residence-nearby
+  ask neighbourhoods with [D-No = Num and N-empty > 0 and any? patches with [N-neighbourhood = [N-No] of myself and lu = 5] ] [
+    set N-suitability N-suitability + 1]  ;; Green-local
+end
+
+
+to build-local
+  if RoadPattern = "Radial" []
+
+  if RoadPattern = "Checker" [
+    ask neighbourhoods with [Ng <= 90] [
+      if (Ni + Ng) >= 90 [ dis-1 ]
+      if (Ni + Ng) < 90 and (Ni + Ng) >= 50 [ local-4 ]
+      if (Ni + Ng) < 50 [ local-5 ]
+    ]
+  ]
+
+  ask patches with [count distributors-here > 1] [
+    let a 0
+    ask one-of distributors-here [set a who]
+    ask distributors-here with [who != a] [
+      ask link-neighbors [ create-distributorlink-with turtle a ]
+      die ]
+  ]
+  ask patches with [count locals-here > 1] [
+    let a 0
+    ask one-of locals-here [set a who]
+    ask locals-here with [who != a] [
+      ask link-neighbors [ create-locallink-with turtle a ]
+      die ]
+  ]
+
+  ask distributors [set color orange]
+  ask locals [ set color sky ]
+end
+
+to dis-1
+  ask patch-here [
+    if N-neighbourhood = [N-no] of myself [
+      sprout-distributors 1 [
+        set heading 0
+        set RoadGrade 3
+        set temporary N-neighbourhood
+        hatch 1 [
+          lt 90
+          Build_DisSegment
+          die
+        ]
+        hatch 1 [
+          rt 90
+          Build_DisSegment
+          die
+        ]
+        hatch 1 [
+          rt 180
+          Build_DisSegment
+          die
+        ]
+        Build_DisSegment
+        die
+      ]
+    ]
+  ]
+  ask templinks [
+    set breed distributorlinks
+    set color orange
+  ]
+end
+
+to local-2  ;;a road network like #.
+  ask (patch-set patch-at (-1 / 6 * DistanceDistributors) (-1 / 6 * DistanceDistributors) patch-at (1 / 6 * DistanceDistributors) (1 / 6 * DistanceDistributors) ) [
+    if N-neighbourhood = [N-no] of myself [
+      sprout-locals 1 [
+        set heading 0
+        set RoadGrade 4
+        set temporary N-neighbourhood
+        hatch 1 [
+          lt 90
+          Build_DisSegment
+          die
+        ]
+        hatch 1 [
+          rt 90
+          Build_DisSegment
+          die
+        ]
+        hatch 1 [
+          rt 180
+          Build_DisSegment
+          die
+        ]
+        Build_DisSegment
+        die
+      ]
+    ]
+  ]
+  ask templinks [
+    set breed locallinks
+    set color sky
+  ]
+end
+
+to local-3   ;; a road network like 三+川.
+  ask (patch-set patch-at (-1 / 4 * DistanceDistributors) (-1 / 4 * DistanceDistributors) patch-at 0 0 patch-at (1 / 4 * DistanceDistributors) (1 / 4 * DistanceDistributors) ) [
+    if N-neighbourhood = [N-no] of myself [
+      sprout-locals 1 [
+        set heading 0
+        set RoadGrade 4
+        set temporary N-neighbourhood
+        hatch 1 [
+          lt 90
+          Build_DisSegment
+          die
+        ]
+        hatch 1 [
+          rt 90
+          Build_DisSegment
+          die
+        ]
+        hatch 1 [
+          rt 180
+          Build_DisSegment
+          die
+        ]
+        Build_DisSegment
+        die
+      ]
+    ]
+  ]
+  ask templinks [
+    set breed locallinks
+    set color sky
+  ]
+end
+
+to local-4
+  ask (patch-set patch-at (-3 / 10 * DistanceDistributors) (-3 / 10 * DistanceDistributors) patch-at (3 / 10 * DistanceDistributors) (3 / 10 * DistanceDistributors) patch-at (1 / 10 * DistanceDistributors) (1 / 10 * DistanceDistributors) patch-at (-1 / 10 * DistanceDistributors) (-1 / 10 * DistanceDistributors)) [
+    if N-neighbourhood = [N-no] of myself [
+      sprout-locals 1 [
+        set heading 0
+        set RoadGrade 4
+        set temporary N-neighbourhood
+        hatch 1 [
+          lt 90
+          Build_DisSegment
+          die
+        ]
+        hatch 1 [
+          rt 90
+          Build_DisSegment
+          die
+        ]
+        hatch 1 [
+          rt 180
+          Build_DisSegment
+          die
+        ]
+        Build_DisSegment
+        die
+      ]
+    ]
+  ]
+  ask templinks [
+    set breed locallinks
+    set color sky
+  ]
+end
+
+to local-5
+  ask (patch-set patch-at (-1 / 6 * DistanceDistributors) (-1 / 6 * DistanceDistributors) patch-at (1 / 6 * DistanceDistributors) (1 / 6 * DistanceDistributors) patch-at (-1 / 3 * DistanceDistributors) (-1 / 3 * DistanceDistributors) patch-at (1 / 3 * DistanceDistributors) (1 / 3 * DistanceDistributors) patch-at 0 0) [
+    if N-neighbourhood = [N-no] of myself [
+      sprout-locals 1 [
+        set heading 0
+        set RoadGrade 4
+        set temporary N-neighbourhood
+        hatch 1 [
+          lt 90
+          Build_DisSegment
+          die
+        ]
+        hatch 1 [
+          rt 90
+          Build_DisSegment
+          die
+        ]
+        hatch 1 [
+          rt 180
+          Build_DisSegment
+          die
+        ]
+        Build_DisSegment
+        die
+      ]
+    ]
+  ]
+  ask templinks [
+    set breed locallinks
+    set color sky
+  ]
+end
+
+to Build_DisSegment
+  let px0 [pxcor] of patch-here
+  let py0 [pycor] of patch-here
+  let px [pxcor] of patch-here
+  let py [pycor] of patch-here
+  set road RoadGrade
+  let a 0
+  hatch 1 [
+    move-to patch-here
+    set a who ]
+
+  let step 0.2
+  while [N-neighbourhood = temporary] [
+    fd step
+    set px [pxcor] of patch-here
+    set py [pycor] of patch-here
+    if px != px0 or py != py0 [
+      set road RoadGrade
+      hatch 1 [
+        move-to patch-here
+        create-templink-with turtle a
+        set a who
+      ]
+      set px0 px
+      set py0 py
+    ]
+  ]
+end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;        Road Network        ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+to link-roadnetwork
+  ask locals [set temporary 0]
+  ask patches with [count locals-here = 1 and count distributors-here = 1] [
+    let a 0
+    ask distributors-here [set a who]
+    ask locals-here [
+      ask link-neighbors [
+        create-locallink-with turtle a [set color sky]
+      ]
+      die
+    ]
+  ]
+
+  ;;ask patches with [count locals-here = 1 and count arterials-here = 1] [  ask locals-here [die]  ]
+  ask patches with [count locals-here = 1 and count arterials-here = 1] [
+    let a 0
+    ask arterials-here [set a who]
+    ask locals-here [
+      ask link-neighbors [
+        create-locallink-with turtle a [set color sky]
+      ]
+      die
+    ]
+  ]
+
+  ask patches with [count distributors-here = 1 and count arterials-here = 1] [
+    let a 0
+    ask arterials-here [ set a who ]
+    ask distributors-here [
+      ask link-neighbors [
+        create-distributorlink-with turtle a [set color orange ] ]
+      die
+    ]
+  ]
+
+  ask patches with [count highways-here = 1 and count arterials-here = 1] [
+    let a 0
+    ask highways-here [ set a who ]
+    ask arterials-here [
+      if count my-distributorlinks = 0 [
+        ask link-neighbors [
+          create-arteriallink-with turtle a [set color red ] ]
+        die
+      ] ]
+  ]
+end
+
+;; simplify road network
+to simp-net
+  ;; to combine links, or symplify lines of one type
+  ask links [set RoadLength link-length]
+  ask locals with [count my-links = 2 and temporary = 0] [
+    let node1 0
+    let length1 0
+    let length2 0
+    let a 0
+    ask my-links [
+      if a = 0 [ set length1 RoadLength ]
+      if a = 1 [ set length2 RoadLength ]
+      set a a + 1 ]
+    ask one-of link-neighbors [set node1 who]
+    ask link-neighbors with [ who != node1] [
+      create-locallink-with turtle node1 [
+        set color sky
+        set RoadLength length1 + length2]    ]
+    die
+  ]
+  ask distributors with [count my-links = 2] [
+    let node1 0
+    let length1 0
+    let length2 0
+    let a 0
+    ask my-links [
+      if a = 0 [ set length1 RoadLength ]
+      if a = 1 [ set length2 RoadLength ]
+      set a a + 1 ]
+    ask one-of link-neighbors [set node1 who]
+    ask link-neighbors with [ who != node1] [
+      create-distributorlink-with turtle node1 [
+        set color orange
+        set RoadLength length1 + length2]    ]
+    die
+  ]
+  ask arterials with [count my-links = 2] [
+    let node1 0
+    let length1 0
+    let length2 0
+    let a 0
+    ask my-links [
+      if a = 0 [ set length1 RoadLength ]
+      if a = 1 [ set length2 RoadLength ]
+      set a a + 1 ]
+    ask one-of link-neighbors [set node1 who]
+    ask link-neighbors with [ who != node1] [
+      create-arteriallink-with turtle node1 [
+        set color red
+        set RoadLength length1 + length2]    ]
+    die
+  ]
+  ask highways with [count my-links = 2] [
+    let node1 0
+    let length1 0
+    let length2 0
+    let a 0
+    ask my-links [
+      if a = 0 [ set length1 RoadLength ]
+      if a = 1 [ set length2 RoadLength ]
+      set a a + 1 ]
+    ask one-of link-neighbors [set node1 who]
+    ask link-neighbors with [ who != node1] [
+      create-highwaylink-with turtle node1 [
+        set color blue
+        set RoadLength length1 + length2]    ]
+    die
+  ]
+
+  ;; condition of highways and arterials are overlapping
+  ask highways with [count my-arteriallinks = 2 and count my-highwaylinks = 2 and count link-neighbors with [breed = arterials] = 0] [
+    let node1 0
+    let length1 0
+    let length2 0
+    let a 0
+    ask my-arteriallinks [
+      if a = 0 [ set length1 RoadLength ]
+      if a = 1 [ set length2 RoadLength ]
+      set a a + 1 ]
+    ask one-of arteriallink-neighbors [set node1 who]
+    ask arteriallink-neighbors with [ who != node1] [
+      create-arteriallink-with turtle node1 [
+        set color red
+        set RoadLength length1 + length2 ]
+    ]
+    set a 0
+    ask my-highwaylinks [
+      if a = 0 [ set length1 RoadLength ]
+      if a = 1 [ set length2 RoadLength ]
+      set a a + 1 ]
+    ask one-of highwaylink-neighbors [set node1 who]
+    ask highwaylink-neighbors with [who != node1] [
+      create-highwaylink-with turtle node1 [
+        set color blue
+        set RoadLength length1 + length2 ]
+    ]
+    die  ]
+
+  ;; identify nodes
+  ask highways     [ set breed roadnodes ]
+  ask arterials    [ set breed roadnodes ]
+  ask distributors [ set breed roadnodes ]
+  ask locals [ set breed roadnodes ]
+  let a 0
+  foreach sort roadnodes [ x ->
+    ask x [
+      set Node a
+      set a a + 1
+    ]
+  ]
+end
+
+;; identify nearest node of districts and neighbourhoods
+to link-land
+  ask districts [
+    let a 0
+    ask min-one-of roadnodes [distance myself] [
+      set a Node]
+    set D-node a
+  ]
+  ask neighbourhoods [
+    setxy (mean [pxcor] of patches with [N-neighbourhood = [N-No] of myself]) (mean [pycor] of patches with [N-neighbourhood = [N-No] of myself])
+    let a 0
+    ask min-one-of roadnodes [distance myself] [
+      set a Node]
+    set N-node a
+  ]
+end
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;         Output             ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+to output-road
+  let nodes count roadnodes
+  let roads 2 * count links
+
+  let file "road_net_node.dat"
+  if file-exists? file [file-delete file]
+  file-open file
+  file-type nodes file-write roads file-print ""
+  foreach sort roadnodes [ x ->
+    ask x [
+      file-type xcor * resolution
+      file-write ycor * resolution
+      file-print "" ]
+  ]
+  file-close
+
+  set file "road_net.dat"
+  if file-exists? file [file-delete file]
+  file-open file
+  foreach sort roadnodes [ x ->
+    ask x [
+      let a Node
+      ask my-links [
+        file-type a
+        file-write [Node] of other-end
+        if breed = highwaylinks [file-write 4]
+        if breed = arteriallinks [file-write 3]
+        if breed = distributorlinks [file-write 2]
+        if breed = locallinks [file-write 1]
+        file-write precision (RoadLength * resolution / 1000) 4
+        file-print ""
+      ]
+    ]
+  ]
+  file-close
+end
+
+to output-landuse
+  let file "land_use.dat"
+  if file-exists? file [file-delete file]
+  file-open file
+  let a sum [landuses] of neighbourhoods
+  file-type 5
+  file-write a
+  file-write 0
+  file-print ""
+  file-print 1  ;1 residence 2 industry 3 commerce 4 office 5 green&open
+  file-print 2
+  file-print 3
+  file-print 4
+  file-print 5
+  ask neighbourhoods with [Nr > 0] [
+        file-type N-node
+        file-write round (xcor * resolution)
+        file-write round (ycor * resolution)
+        file-write 1
+        file-write round (Nr * N-area / 100 * resolution * resolution)  ;;assume that the average plot ratio is 2.
+        file-write 0
+        file-write 0
+        file-write 0
+        file-write D-No
+        file-write 3
+        file-write 1
+        file-write N-No - 1
+        file-print ""
+  ]
+  ask neighbourhoods with [Ni > 0] [
+        file-type N-node
+        file-write round (xcor * resolution)
+        file-write round (ycor * resolution)
+        file-write 2
+        file-write round (Ni * N-area / 100 * resolution * resolution)
+        file-write 0
+        file-write 0
+        file-write 0
+        file-write D-No
+        file-write 3
+        file-write 1
+        file-write N-No - 1
+        file-print ""
+  ]
+  ask neighbourhoods with [Nc > 0] [
+        file-type N-node
+        file-write round (xcor * resolution)
+        file-write round (ycor * resolution)
+        file-write 3
+        file-write round (Nc * N-area / 100 * resolution * resolution * 2)  ;;assume that the average plot ratio is 2.
+        file-write 0
+        file-write 0
+        file-write 0
+        file-write D-No
+        file-write 3
+        file-write 1
+        file-write N-No - 1
+        file-print ""
+  ]
+  ask neighbourhoods with [No > 0] [
+        file-type N-node
+        file-write round (xcor * resolution)
+        file-write round (ycor * resolution)
+        file-write 4
+        file-write round (No * N-area / 100 * resolution * resolution * 2)  ;;assume that the average plot ratio is 2.
+        file-write 0
+        file-write 0
+        file-write 0
+        file-write D-No
+        file-write 3
+        file-write 1
+        file-write N-No - 1
+        file-print ""
+  ]
+  ask neighbourhoods with [Ng > 0] [
+        file-type N-node
+        file-write round (xcor * resolution)
+        file-write round (ycor * resolution)
+        file-write 5
+        file-write round (Ng * N-area / 100 * resolution * resolution)
+        file-write 0
+        file-write 0
+        file-write 0
+        file-write D-No
+        file-write 3
+        file-write 1
+        file-write N-No - 1
+        file-print ""
+  ]
+  file-close
+end
+
+to output-pc4
+  let file "pc4.txt"
+  if file-exists? file [file-delete file]
+  file-open file
+  foreach sort districts [ [?1] ->
+    ask ?1 [
+      file-write D-No
+      let a D-node
+      ask one-of turtles with [Node = a] [
+        file-write Node
+        file-write xcor * resolution
+        file-write ycor * resolution]
+    ]  ]
+  file-close
+
+  set file "land_use_ppc4s_constant.dat"
+  if file-exists? file [file-delete file]
+  file-open file
+  file-print count neighbourhoods
+  ask neighbourhoods [
+      file-type 0.5
+      file-write 0.5
+      file-write 0.5
+      file-write 0.5
+      file-write 0.5
+      file-print ""
+  ]
+  file-close
+end
+
+to output-ap
+  ask travellers [die]
+  ask landfiles [die]
+  file-close-all
+
+  ;; to read land use file and check the number of line of a specific piece of land
+  let file "land_use.dat"
+  if not file-exists? file [user-message "Error! No land use data before AP generation!"]
+  file-open file
+  let temp 8  ;;number of data before first land use in this case
+  while [temp > 0] [
+    let temp2 file-read
+    set temp temp - 1
+  ]
+  set temp 0 ;;line number of first land use in this case
+  while [not file-at-end?] [
+    create-landfiles 1 [
+      set Num-line temp
+      set temp temp + 1
+      set Land-node file-read
+      let temp2 file-read  set temp2 file-read ;; skip two coordinates of land use
+      set Land-type file-read
+      set temp2 file-read  set temp2 file-read  set temp2 file-read  set temp2 file-read  ;;skip 4 other numbers
+      set D-No file-read
+      set temp2 file-read  set temp2 file-read  ;;skip 2 other numbers
+      set N-No file-read
+    ]
+  ]
+  file-close
+
+  ;;create travellers and read ap-input
+  set file "ap-input.dat"
+  if not file-exists? file [user-message "Error! Input file does not exist!"]
+  file-open file
+  while [not file-at-end?] [
+    create-travellers 1 [
+      set PersID file-read
+      set FactorP file-read
+      let vertuur file-read
+      let vertmin file-read
+      set DeparTime 60 * vertuur + vertmin
+      set Motive file-read
+      set Duration file-read
+      set VertPC file-read
+      set AankPC file-read
+      set gender file-read
+      set age file-read
+      set income file-read
+      set education file-read
+      set physical 1
+      set FullWork file-read
+      set WorkType 0
+      set car file-read
+      set bike file-read
+      set PT file-read
+      set TransMode file-read
+      set license file-read
+      set civilian file-read
+      set year file-read
+        let Vertrekp file-read
+        let Verpl file-read
+        set VerplNr file-read
+        let Toer file-read
+        let Reisduur file-read
+        let afstv file-read
+    ]
+  ]
+  file-close
+
+  ;; adjust work type, civilian, act-num, car, bike, pt
+  ask travellers with [verplnr = 1] [
+    let m 0
+    if FullWork = 4 [
+      let n random 2
+      ifelse n = 0 [set m 0] [set m 1] ]
+    if FullWork = 1 or FullWork = 2 [set m 0]
+    if FullWork = 3 [set m 1]
+    set FullWork m
+
+    ifelse civilian = CityCode [set civilian 1 ] [ set civilian 0 ]
+    set act-num count travellers with [PersID = [PersID] of myself]
+
+    if 1 <= car and car <= 9 [set car 1]
+    if car = 10 [
+      let n random 2
+      ifelse n = 0 [set car 0] [set car 1]
+    ]
+
+    set bike 1
+
+    if PT <= 3 [set PT 1]
+    if PT = 4 or PT = 5 [set PT 0]
+    if PT = 6 [
+      let q random 2
+      ifelse q = 0 [set PT 0] [set PT 1]
+    ]
+  ]
+
+  ;;set values of after and before
+  value-after-before
+
+let num 0
+repeat apNum [
+  set num num + 1
+    show num
+  ;;allocate home address: HomeNode, HomePC4, HomePC6
+  let population-real sum [D-residentials] of districts
+  ask travellers with [verplnr = 1] [
+    let id random population-real
+    set HomePC4 min [who] of districts
+    set id id - [D-residentials] of district HomePC4
+    while [id > 0] [
+      let hometemp HomePC4
+      set HomePC4 min [who] of districts with [who > hometemp]
+      set id id - [D-residentials] of district HomePC4  ;;OF expected input to be a turtle agentset or turtle but got NOBODY instead.
+    ]
+    set HomePC4 [D-No] of district HomePC4
+
+    let population-district sum [N-residentials] of neighbourhoods with [D-No = [HomePC4] of myself]
+    set id random population-district
+    set HomePC6 min [who] of neighbourhoods with [D-No = [HomePC4] of myself]
+    set id id - [N-residentials] of neighbourhood HomePC6
+    while [id > 0] [
+      let hometemp HomePC6
+      set HomePC6 min [who] of neighbourhoods with [who > hometemp and D-No = [HomePC4] of myself]
+      set id id - [N-residentials] of neighbourhood HomePC6
+    ]
+    set HomeNode [N-node] of neighbourhood HomePC6
+    set HomePC6 [N-No] of neighbourhood HomePC6
+
+    ask other travellers with [PersID = [PersID] of myself] [
+      set HomeNode [HomeNode] of myself
+      set HomePC4 [HomePC4] of myself
+      set HomePC6 [HomePC6] of myself
+    ]
+  ]
+
+  ;;allocate work address: WorkNode, WorkPC6, WorkPC4
+  let work-opportunity 0
+  ask Districts [
+      set work-opportunity work-opportunity + round ((1 * Di + 10 * Do) * D-area)
+  ]
+  ask travellers with [verplnr = 1] [
+    let abc random work-opportunity
+    let wp 0
+    foreach sort Districts [ x ->
+      ask x [
+        if abc >= 0 [
+          set abc abc - round ((1 * Di + 10 * Do) * D-area)
+          if abc < 0 [ set wp who ]
+        ]
+      ]
+    ]
+    if abc >= 0 [user-message "Error! Work place at DISTRICT!"]
+    set WorkPC4 [D-No] of district wp
+
+    let job-density 0
+    ask neighbourhoods with [D-No = [WorkPC4] of myself] [
+      set job-density job-density + round ((1 * Ni + 10 * No) * N-area)
+    ]
+    set abc random job-density
+    foreach sort neighbourhoods with [D-No = [WorkPC4] of myself] [x ->
+      ask x [
+        if abc >= 0 [
+          set abc abc - round ((1 * Ni + 10 * No) * N-area)
+          if abc < 0 [set wp who]
+        ]
+      ]
+    ]
+    if abc >= 0 [user-message "Error! Work place at NEIGHBOURHOOD!"]
+    set WorkNode [N-Node] of neighbourhood wp
+    set WorkPC6 [N-No] of neighbourhood wp
+
+    ask other travellers with [PersID = [PersID] of myself] [
+      set WorkNode [WorkNode] of myself
+      set WorkPC6 [WorkPC6] of myself
+      set WorkPC4 [WorkPC4] of myself
+    ]
+  ]
+
+  ;;create activity programme (AP)
+  set file (word "ap" num "/actProg.dat")
+  if file-exists? file [file-delete file]
+  file-open file
+  let a count travellers with [verplnr = 1]
+  let c (count travellers) + a
+  file-type a
+  file-write c
+  file-print ""
+  foreach sort travellers [ x ->
+    ask x [
+      if verplnr = 1 [
+        file-type 0
+        file-write PersID
+        file-write act-num
+        file-write -1
+        file-write DeparTime
+        file-write -1
+        file-write 0
+        file-write 0
+        file-write 0
+        file-write 0
+        file-print ""
+      ]
+      ;;adjust activity types (motivation)
+      ;;fix == true, need to allocate the activity by NetLogo; fix == false, output -1, let MSN allocate later.
+      ifelse Motive = 1 [
+        file-type 50
+        file-write -2
+      ]
+      [
+        ifelse Motive = 2 [
+          ask one-of landfiles with [Land-node = [WorkNode] of myself and (Land-type = 2 or Land-type = 4)] [
+            file-type Land-type
+            file-write Num-line
+          ]
+        ]
+        [
+          ifelse Motive = 3 or Motive = 5 or Motive = 6 or Motive = 14 [
+            ask one-of landfiles [
+              file-type Land-type
+              file-write Num-line
+            ]
+          ]
+          [
+            ifelse Motive = 7 [
+              ask one-of landfiles with [Land-type = 4] [
+                file-type 4
+                file-write Num-line
+              ]
+            ]
+            [
+              ifelse Motive = 8 [
+                file-type 3
+                file-write -1
+              ]
+              [
+                ifelse Motive = 9 [
+                  ask one-of landfiles with [Land-type = 1] [
+                    file-type 1
+                    file-write Num-line
+                  ]
+                ]
+                [
+                  ifelse Motive = 10 or Motive = 11 or Motive = 12 [
+                    file-type 5
+                    file-write -1
+                  ]
+                  [
+                    if Motive = 13 [
+                      file-type 4
+                      file-write -1
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+      file-write Duration
+      file-write after
+      file-write before
+      file-write 0
+      file-write 0
+      file-write 0
+      file-write 0
+      file-write 0
+      file-print ""
+    ]
+  ]
+  file-close
+
+  ;;create individuals profiles
+  set file (word "ap" num "/perProfile.dat")
+  if file-exists? file [file-delete file]
+  file-open file
+  foreach sort travellers with [verplnr = 1] [ [?1] ->
+    ask ?1 [
+      file-type PersID
+      file-write PersID ;;House ID
+      file-write HomeNode
+      file-write gender
+      file-write age
+      file-write income
+      file-write education
+      file-write physical
+      file-write FullWork
+      file-write 0
+      file-write car
+      file-write bike
+      file-write PT
+      file-write TransMode
+      file-write license
+      file-write civilian
+      file-print ""
+    ]
+  ]
+  file-close
+
+  ;;create homes profiles
+  set file (word "ap" num "/perHome.dat")
+  if file-exists? file [file-delete file]
+  file-open file
+  foreach sort travellers with [verplnr = 1] [ [?1] ->
+    ask ?1 [
+      file-type HomeNode
+      ask one-of neighbourhoods with [N-node = [HomeNode] of myself] [
+        file-write round (xcor * resolution)
+        file-write round (ycor * resolution)
+      ]
+      file-write HomePC4
+      file-write 1
+      file-write 2012
+      file-write 0
+      file-write 0
+      file-write 0
+      file-print ""
+    ]  ]
+  file-close
+]
+
+  ask travellers [die]
+  ask landfiles [die]
+  file-close-all
+end
+
+
+;; set value of after and before
+to value-after-before
+  let m -1
+  let nid -1
+  ask travellers with [verplnr = 1] [
+    set m act-num
+    set nid PersID
+    ask travellers with [PersID = nid] [
+    if m = 1 [
+      if verplnr = 1 [
+        set after 0
+        set before 0
+      ]
+    ]
+    if m = 2 [
+      if verplnr = 1 [
+        set after 0
+        set before 2
+      ]
+      if verplnr = 2 [
+        set after 1
+        set before 0
+      ]
+    ]
+    if m = 3 [
+      if verplnr = 1 [
+        set after 0
+        set before 6
+      ]
+      if verplnr = 2 [
+        set after 1
+        set before 4
+      ]
+      if verplnr = 3 [
+        set after 3
+        set before 0
+      ]
+    ]
+    if m = 4 [
+      if verplnr = 1 [
+        set after 0
+        set before 14
+      ]
+      if verplnr = 2 [
+        set after 1
+        set before 12
+      ]
+      if verplnr = 3 [
+        set after 3
+        set before 8
+      ]
+      if verplnr = 4 [
+        set after 7
+        set before 0
+      ]
+    ]
+    if m = 5 [
+      if verplnr = 1 [
+        set after 0
+        set before 30
+      ]
+      if verplnr = 2 [
+        set after 1
+        set before 28
+      ]
+      if verplnr = 3 [
+        set after 3
+        set before 24
+      ]
+      if verplnr = 4 [
+        set after 7
+        set before 16
+      ]
+      if verplnr = 5 [
+        set after 15
+        set before 0
+      ]
+    ]
+    if m = 6 [
+      if verplnr = 1 [
+        set after 0
+        set before 62
+      ]
+      if verplnr = 2 [
+        set after 1
+        set before 60
+      ]
+      if verplnr = 3 [
+        set after 3
+        set before 56
+      ]
+      if verplnr = 4 [
+        set after 7
+        set before 48
+      ]
+      if verplnr = 5 [
+        set after 15
+        set before 32
+      ]
+      if verplnr = 6 [
+        set after 31
+        set before 0
+      ]
+    ]
+    ]
+  ]
+end
+
+to output-ASCII
+  let file "ASCII.dat"
+  if file-exists? file [file-delete file]
+  file-open file
+  let y 200
+  while [y >= -200] [
+    let x -200
+    while [x <= 200] [
+      ask patch x y [ file-write lu]
+      set x x + 1
+    ]
+    file-print ""
+    set y y - 1
+  ]
+  file-close
+end
+
+to output-metrics
+  file-close-all
+  let file "metrics.dat"
+  if file-exists? file [file-delete file]
+
+  ;;Entropy
+  let Entropy-C -1 * ((Residential / 100) * ln (Residential / 100) + (Industrial / 100) * ln (Industrial / 100) + (Commercial / 100) * ln (Commercial / 100) + (Office / 100) * ln (Office / 100) + (Green&Open / 100) * ln (Green&Open / 100)) / ln 5
+  ;;let Entropy-D mean [Entropy] of districts
+  ;;let Entropy-N mean [Entropy] of neighbourhoods
+  let sum-EA 0
+  ask districts [set sum-EA sum-EA + Entropy * D-Area]
+  let Weighted-E-D sum-EA / sum [D-Area] of districts
+  set sum-EA 0
+  ask neighbourhoods [set sum-EA sum-EA + Entropy * N-Area]
+  let Weighted-E-N sum-EA / sum [N-area] of neighbourhoods
+  file-open file
+  file-print "*** Entropy ***"
+  file-print "Entropy of whole city is:"
+  file-print precision Entropy-C 3
+  ;;file-print "Average entropy of districts is:"
+  ;;file-print precision Entropy-D 3
+  file-print "Weighted entropy of districts is:"
+  file-print precision Weighted-E-D 3
+  ;;file-print "Average entropy of neighbourhoods is:"
+  ;;file-print precision Entropy-N 3
+  file-print "Weighted entropy of neighbourhoods is:"
+  file-print precision Weighted-E-N 3
+  file-print ""
+  file-close
+
+  ;;Block size (hectare)
+  let Block-D (mean [D-area] of districts) * Resolution ^ 2 / 10000
+  let Block-N (mean [N-area] of neighbourhoods) * Resolution ^ 2 / 10000
+  file-open file
+  file-print "*** Average Block Size ***"
+  file-print "The number of districts is:"
+  file-print count districts
+  file-print "The average district size (hectar) is:"
+  file-print precision Block-D 2
+  file-print "The number of neighbourhoods is:"
+  file-print count neighbourhoods
+  file-print "The average neighbourhood size (hectar) is:"
+  file-print precision Block-N 2
+  file-print ""
+  file-close
+
+  ;;Number of intersections per square mile
+  let Num-Nodes count roadnodes - 4
+  file-open file
+  file-print "*** Number of intersections per square mile ***"
+  file-print precision (Num-Nodes / Area) 2
+  file-print ""
+  file-close
+
+  ;;Number of stations per unit area
+  let Num-Stations (count stations with [distance patch 0 0 <= CityRadius]) / 2
+  file-open file
+  file-print "*** Number of stations per square mile ***"
+  file-print precision (Num-Stations / Area) 2
+  file-print ""
+  file-close
+
+  ;;Road Network
+  let Length-local sum [RoadLength] of locallinks
+  set length-local precision (length-local * resolution / 1000) 2
+  let Length-distributor sum [RoadLength] of distributorlinks
+  set Length-distributor precision (Length-distributor * resolution / 1000) 2
+  let Length-arterial sum [RoadLength] of arteriallinks
+  set Length-arterial precision (Length-arterial * resolution / 1000) 2
+  file-open file
+  file-print "*** Road Network ***"
+  file-print "The length of local is:"
+  file-print precision Length-local 2
+  file-print "The length of distributor is:"
+  file-print precision Length-distributor 2
+  file-print "The length of arterial is:"
+  file-print precision Length-arterial 2
+  file-print ""
+  file-close
+end
+
+to output-test-metrics
+  ;file-close-all
+
+  ;let file "test-metrics.dat"
+  ;if file-exists? file [file-delete file]
+
+  let Length-distributor sum [RoadLength] of distributorlinks
+  set Length-distributor precision (Length-distributor * resolution / 1000) 2
+  let Length-arterial sum [RoadLength] of arteriallinks
+  set Length-arterial precision (Length-arterial * resolution / 1000) 2
+  let Length-local sum [RoadLength] of locallinks
+  set Length-local precision (Length-local * resolution / 1000) 2
+  ;file-open file
+  print "The districts are:"
+  print count districts
+  print "The neighbourhoods are:"
+  print count neighbourhoods
+  print "The length of arterial is:"
+  print precision Length-arterial 2
+  print "The length of distributor is:"
+  print precision Length-distributor 2
+  print "The length of locals is:"
+  print precision Length-local 2
+  ;;file-close
+end
+
+to output-density
+  file-close-all
+  let file "density-N.dat"
+  if file-exists? file [file-delete file]
+  file-open file
+  let disx 0
+  let p-density 1
+  while [p-density > 0] [
+    let area-disx count patches with [distancexy 0 0 <= (disx + 250) / resolution and distancexy 0 0 > (disx - 250) / resolution]
+    let area-h count patches with [distancexy 0 0 <= (disx + 250) / resolution and distancexy 0 0 > (disx - 250) / resolution and lu = 1.5]
+    let area-l count patches with [distancexy 0 0 <= (disx + 250) / resolution and distancexy 0 0 > (disx - 250) / resolution and lu = 1]
+    let residentials Dhigh * area-h + Dlow * area-l
+    set p-density precision (residentials / (area-disx * resolution ^ 2 / 1000000)) 2
+    if p-density > 0 [
+      file-type disx / 1000
+      file-write p-density
+      file-print ""
+    ]
+    set disx disx + 500
+  ]
+  file-close
+end
+
+to re-landuse    ;;re-allocate land use of a district
+  let a D-No
+  ask patches with [lu = 5 and N-district = a] [set lu 0 set pcolor black]
+  ;;if Di > 0 [allocate-industrial-nei D-No]
+ ;; if Dc > 0 [allocate-commercial-nei D-No]
+ ;; if Do > 0 [allocate-office-nei D-No]
+ ;; if Dr > 0 [allocate-residential-nei D-No]
+ ;; if Dg > 0 [allocate-green&open-nei D-No]
+  set Dr-area count patches with [lu = 1 or lu = 1.5]
+  set Di-area count patches with [lu = 2]
+  set Dc-area count patches with [lu = 3]
+  set Do-area count patches with [lu = 4]
+  set Dg-area count patches with [lu = 5]
+  set D-residentials precision (Dhigh * Drh * D-area / 100 + Dlow * Drl * D-area / 100) 0
+
+  ask neighbourhoods with [D-No = a] [
+    set landuses 0
+    if Ni > 0 [set landuses landuses + 1]
+    if Nr > 0 [set landuses landuses + 1]
+    if Nc > 0 [set landuses landuses + 1]
+    if No > 0 [set landuses landuses + 1]
+    if Ng > 0 [set landuses landuses + 1]
+  ]
+end
